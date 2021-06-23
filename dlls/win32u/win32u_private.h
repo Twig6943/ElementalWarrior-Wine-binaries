@@ -208,6 +208,9 @@ struct unix_funcs
     BOOL (CDECL *get_file_outline_text_metric)( const WCHAR *path, OUTLINETEXTMETRICW *otm );
     BOOL (CDECL *get_icm_profile)( HDC hdc, BOOL allow_default, DWORD *size, WCHAR *filename );
     BOOL (CDECL *wine_send_input)( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput );
+    LRESULT (CDECL *wine_send_internal_message_timeout)( DWORD dest_pid, DWORD dest_tid,
+                                                         UINT msg, WPARAM wparam, LPARAM lparam,
+                                                         UINT flags, UINT timeout, PDWORD_PTR res_ptr );
 };
 
 /* clipboard.c */

@@ -1328,3 +1328,6 @@
 @ cdecl __wine_get_brush_bitmap_info(long ptr ptr ptr)
 @ cdecl __wine_get_icm_profile(long long ptr ptr)
 @ cdecl __wine_get_file_outline_text_metric(wstr ptr)
+
+# message
+@ cdecl __wine_send_internal_message_timeout(long long long long long long long ptr)

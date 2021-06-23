@@ -804,6 +804,15 @@ BOOL CDECL __wine_send_input( HWND hwnd, const INPUT *input, const RAWINPUT *raw
     return unix_funcs->wine_send_input( hwnd, input, rawinput );
 }
 
+LRESULT CDECL __wine_send_internal_message_timeout( DWORD dest_pid, DWORD dest_tid,
+                                                    UINT msg, WPARAM wparam, LPARAM lparam,
+                                                    UINT flags, UINT timeout, PDWORD_PTR res_ptr )
+{
+    if (!unix_funcs) return 0;
+    return unix_funcs->wine_send_internal_message_timeout( dest_pid, dest_tid, msg, wparam, lparam,
+                                                           flags, timeout, res_ptr );
+}
+
 extern void wrappers_init( unixlib_handle_t handle )
 {
     const void *args;

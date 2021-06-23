@@ -4766,6 +4766,9 @@ WORD        WINAPI SYSTEM_KillSystemTimer( WORD );
 
 #ifdef __WINESRC__
 WINUSERAPI BOOL CDECL __wine_send_input( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput );
+WINUSERAPI LRESULT CDECL __wine_send_internal_message_timeout( DWORD dest_pid, DWORD dest_tid,
+                                                               UINT msg, WPARAM wparam, LPARAM lparam,
+                                                               UINT flags, UINT timeout, PDWORD_PTR res_ptr );
 
 /* Uxtheme hook functions and struct */
 

@@ -3393,6 +3393,20 @@ static BOOL send_message_callback( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
 }
 
 /***********************************************************************
+ *		     __wine_send_internal_message_timeout  (win32u.@)
+ *
+ * Same as SendMessageTimeoutW but sends the message to a specific thread
+ * without requiring a window handle. Only works for internal Wine messages.
+ */
+LRESULT CDECL __wine_send_internal_message_timeout( DWORD dest_pid, DWORD dest_tid,
+                                                    UINT msg, WPARAM wparam, LPARAM lparam,
+                                                    UINT flags, UINT timeout, PDWORD_PTR res_ptr )
+{
+    return send_internal_message_timeout( dest_pid, dest_tid, msg, wparam, lparam,
+                                          flags, timeout, res_ptr );
+}
+
+/***********************************************************************
  *           NtUserPostMessage  (win32u.@)
  */
 BOOL WINAPI NtUserPostMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )

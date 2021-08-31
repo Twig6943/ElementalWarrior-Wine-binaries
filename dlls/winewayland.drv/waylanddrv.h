@@ -25,7 +25,12 @@
 # error You must include config.h to use this header
 #endif
 
+#include <stdarg.h>
 #include <wayland-client.h>
+
+#include "windef.h"
+#include "winbase.h"
+#include "ntuser.h"
 
 #include "unixlib.h"
 
@@ -34,6 +39,21 @@
  */
 
 extern struct wl_display *process_wl_display DECLSPEC_HIDDEN;
+
+/**********************************************************************
+ *          Wayland thread data
+ */
+
+struct wayland_thread_data
+{
+};
+
+extern struct wayland_thread_data *wayland_init_thread_data(void) DECLSPEC_HIDDEN;
+
+static inline struct wayland_thread_data *wayland_thread_data(void)
+{
+    return (struct wayland_thread_data *)(UINT_PTR)NtUserGetThreadInfo()->driver_data;
+}
 
 /**********************************************************************
  *          Wayland initialization

@@ -29,11 +29,68 @@
 
 #include "waylanddrv.h"
 
+#include "wine/debug.h"
+#include "wine/gdi_driver.h"
+
+#include <stdlib.h>
+
+WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
+
+/***********************************************************************
+ *           Initialize per thread data
+ */
+struct wayland_thread_data *wayland_init_thread_data(void)
+{
+    struct wayland_thread_data *data = wayland_thread_data();
+
+    if (data) return data;
+
+    if (!(data = calloc(1, sizeof(*data))))
+    {
+        ERR("could not create data\n");
+        NtTerminateProcess(0, 1);
+    }
+
+    NtUserGetThreadInfo()->driver_data = (UINT_PTR)data;
+
+    return data;
+}
+
+/***********************************************************************
+ *           ThreadDetach (WAYLAND.@)
+ */
+static void WAYLAND_ThreadDetach(void)
+{
+    struct wayland_thread_data *data = wayland_thread_data();
+
+    if (data)
+    {
+        free(data);
+        /* clear data in case we get re-entered from user32 before the thread is truly dead */
+        NtUserGetThreadInfo()->driver_data = 0;
+    }
+}
+
+static const struct user_driver_funcs waylanddrv_funcs =
+{
+    .pThreadDetach = WAYLAND_ThreadDetach,
+};
+
+static const struct user_driver_funcs null_funcs = { 0 };
+
 static NTSTATUS waylanddrv_unix_init(void *arg)
 {
-    if (!wayland_process_init()) return STATUS_UNSUCCESSFUL;
+    /* Set the user driver functions now so that they are available during
+     * our initialization. We clear them on error. */
+    __wine_set_user_driver(&waylanddrv_funcs, WINE_GDI_DRIVER_VERSION);
+
+    if (!wayland_process_init()) goto err;
 
     return 0;
+
+err:
+    __wine_set_user_driver(&null_funcs, WINE_GDI_DRIVER_VERSION);
+    return STATUS_UNSUCCESSFUL;
 }
 
 const unixlib_entry_t __wine_unix_call_funcs[] =

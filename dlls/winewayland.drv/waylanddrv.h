@@ -111,4 +111,10 @@ void wayland_mutex_destroy(struct wayland_mutex *wayland_mutex) DECLSPEC_HIDDEN;
 void wayland_mutex_lock(struct wayland_mutex *wayland_mutex) DECLSPEC_HIDDEN;
 void wayland_mutex_unlock(struct wayland_mutex *wayland_mutex) DECLSPEC_HIDDEN;
 
+/**********************************************************************
+ *          USER driver functions
+ */
+
+BOOL WAYLAND_CreateWindow(HWND hwnd) DECLSPEC_HIDDEN;
+
 #endif /* __WINE_WAYLANDDRV_H */

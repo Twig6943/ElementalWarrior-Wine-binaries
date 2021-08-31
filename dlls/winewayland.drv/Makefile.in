@@ -8,5 +8,6 @@ C_SRCS = \
 	wayland.c \
 	wayland_mutex.c \
 	waylanddrv_main.c \
+	window.c \
 
 RC_SRCS = version.rc

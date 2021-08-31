@@ -28,6 +28,7 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include <wayland-client.h>
+#include "xdg-output-unstable-v1-client-protocol.h"
 
 #include "windef.h"
 #include "winbase.h"
@@ -63,6 +64,36 @@ struct wayland
     struct wl_event_queue *wl_event_queue;
     struct wl_registry *wl_registry;
     struct wl_compositor *wl_compositor;
+    struct zxdg_output_manager_v1 *zxdg_output_manager_v1;
+    uint32_t next_fallback_output_id;
+    struct wl_list output_list;
+};
+
+struct wayland_output_mode
+{
+    struct wl_list link;
+    int32_t width;
+    int32_t height;
+    int32_t refresh;
+    int bpp;
+    BOOL native;
+};
+
+struct wayland_output
+{
+    struct wl_list link;
+    struct wayland *wayland;
+    struct wl_output *wl_output;
+    struct zxdg_output_v1 *zxdg_output_v1;
+    struct wl_list mode_list;
+    struct wayland_output_mode *current_mode;
+    int logical_x, logical_y;  /* logical position */
+    int logical_w, logical_h;  /* logical size */
+    int x, y;  /* position in native pixel coordinate space */
+    double compositor_scale; /* scale factor reported by compositor */
+    double scale; /* effective wayland output scale factor for hidpi */
+    char *name;
+    uint32_t global_id;
 };
 
 /**********************************************************************
@@ -113,6 +144,14 @@ void wayland_mutex_init(struct wayland_mutex *wayland_mutex, int kind,
 void wayland_mutex_destroy(struct wayland_mutex *wayland_mutex) DECLSPEC_HIDDEN;
 void wayland_mutex_lock(struct wayland_mutex *wayland_mutex) DECLSPEC_HIDDEN;
 void wayland_mutex_unlock(struct wayland_mutex *wayland_mutex) DECLSPEC_HIDDEN;
+
+/**********************************************************************
+ *          Wayland output
+ */
+
+BOOL wayland_output_create(struct wayland *wayland, uint32_t id, uint32_t version) DECLSPEC_HIDDEN;
+void wayland_output_destroy(struct wayland_output *output) DECLSPEC_HIDDEN;
+void wayland_output_use_xdg_extension(struct wayland_output *output) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          USER driver functions

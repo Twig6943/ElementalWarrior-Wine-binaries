@@ -937,6 +937,7 @@ with_unwind
 with_usb
 with_v4l2
 with_vulkan
+with_wayland
 with_xcomposite
 with_xcursor
 with_xfixes
@@ -1472,6 +1473,7 @@ enable_wineps_drv
 enable_winepulse_drv
 enable_wineusb_sys
 enable_winevulkan
+enable_winewayland_drv
 enable_winex11_drv
 enable_winexinput_sys
 enable_wing32
@@ -2458,6 +2460,7 @@ Optional Packages:
   --without-usb           do not use the libusb library
   --without-v4l2          do not use v4l2 (video capture)
   --without-vulkan        do not use Vulkan
+  --with-wayland          build with wayland support
   --without-xcomposite    do not use the Xcomposite extension
   --without-xcursor       do not use the Xcursor extension
   --without-xfixes        do not use Xfixes for clipboard change notifications
@@ -4383,6 +4386,15 @@ fi
 if test ${with_vulkan+y}
 then :
   withval=$with_vulkan;
+fi
+
+
+# Check whether --with-wayland was given.
+if test ${with_wayland+y}
+then :
+  withval=$with_wayland;
+else $as_nop
+  with_wayland=no
 fi
 
 
@@ -15541,6 +15553,21 @@ enable_winex11_drv=${enable_winex11_drv:-no}
 fi
 fi
 
+if test "x$with_wayland" = "xno"
+then
+    enable_winewayland_drv=no
+fi
+if false
+then :
+  case "x$with_wayland" in
+  x)   as_fn_append wine_notices "|Wayland ${notice_platform}development files not found, the Wayland driver won't be supported." ;;
+  xno) ;;
+  *)   as_fn_error $? "Wayland ${notice_platform}development files not found, the Wayland driver won't be supported.
+This is an error since --with-wayland was requested." "$LINENO" 5 ;;
+esac
+enable_winewayland_drv=${enable_winewayland_drv:-no}
+fi
+
 if test "$ac_cv_header_CL_cl_h" = "yes"
 then
     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for clGetPlatformInfo in -lOpenCL" >&5
@@ -21730,6 +21757,7 @@ wine_fn_config_makefile dlls/wineps16.drv16 enable_win16
 wine_fn_config_makefile dlls/winepulse.drv enable_winepulse_drv
 wine_fn_config_makefile dlls/wineusb.sys enable_wineusb_sys
 wine_fn_config_makefile dlls/winevulkan enable_winevulkan
+wine_fn_config_makefile dlls/winewayland.drv enable_winewayland_drv
 wine_fn_config_makefile dlls/winex11.drv enable_winex11_drv
 wine_fn_config_makefile dlls/winexinput.sys enable_winexinput_sys
 wine_fn_config_makefile dlls/wing.dll16 enable_win16

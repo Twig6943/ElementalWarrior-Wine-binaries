@@ -61,6 +61,8 @@ AC_ARG_WITH(unwind,    AS_HELP_STRING([--without-unwind],[do not use the libunwi
 AC_ARG_WITH(usb,       AS_HELP_STRING([--without-usb],[do not use the libusb library]))
 AC_ARG_WITH(v4l2,      AS_HELP_STRING([--without-v4l2],[do not use v4l2 (video capture)]))
 AC_ARG_WITH(vulkan,    AS_HELP_STRING([--without-vulkan],[do not use Vulkan]))
+AC_ARG_WITH(wayland,   AS_HELP_STRING([--with-wayland],[build with wayland support]),
+            [], [with_wayland=no])
 AC_ARG_WITH(xcomposite,AS_HELP_STRING([--without-xcomposite],[do not use the Xcomposite extension]),
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_Xcomposite_h=no; fi])
 AC_ARG_WITH(xcursor,   AS_HELP_STRING([--without-xcursor],[do not use the Xcursor extension]),
@@ -1334,6 +1336,14 @@ else
                      [X ${notice_platform}development files not found, the X11 driver won't be supported.],
                      [enable_winex11_drv])
 fi
+
+if test "x$with_wayland" = "xno"
+then
+    enable_winewayland_drv=no
+fi
+WINE_NOTICE_WITH(wayland, [false],
+                 [Wayland ${notice_platform}development files not found, the Wayland driver won't be supported.],
+                 [enable_winewayland_drv])
 
 dnl **** Check for OpenCL ****
 if test "$ac_cv_header_CL_cl_h" = "yes"
@@ -3138,6 +3148,7 @@ WINE_CONFIG_MAKEFILE(dlls/wineps16.drv16,enable_win16)
 WINE_CONFIG_MAKEFILE(dlls/winepulse.drv)
 WINE_CONFIG_MAKEFILE(dlls/wineusb.sys)
 WINE_CONFIG_MAKEFILE(dlls/winevulkan)
+WINE_CONFIG_MAKEFILE(dlls/winewayland.drv)
 WINE_CONFIG_MAKEFILE(dlls/winex11.drv)
 WINE_CONFIG_MAKEFILE(dlls/winexinput.sys)
 WINE_CONFIG_MAKEFILE(dlls/wing.dll16,enable_win16)

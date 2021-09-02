@@ -28,6 +28,8 @@
 
 #include "wine/debug.h"
 
+#include <errno.h>
+#include <poll.h>
 #include <stdlib.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
@@ -309,4 +311,94 @@ void wayland_notify_wine_monitor_change(void)
     }
 
     wayland_mutex_unlock(&thread_wayland_mutex);
+}
+
+/**********************************************************************
+ *          wayland_dispatch_queue
+ *
+ * Dispatch events from the specified queue. If the queue is empty,
+ * wait for timeout_ms for events to arrive and then dispatch any events in
+ * the queue.
+ *
+ * Returns the number of events dispatched, -1 on error
+ */
+int wayland_dispatch_queue(struct wl_event_queue *queue, int timeout_ms)
+{
+    struct pollfd pfd = {0};
+    BOOL is_process_queue = queue == process_wayland->wl_event_queue;
+    int ret;
+
+    TRACE("waiting for events with timeout=%d ...\n", timeout_ms);
+
+    pfd.fd = wl_display_get_fd(process_wl_display);
+
+    if (wl_display_prepare_read_queue(process_wl_display, queue) == -1)
+    {
+        if (is_process_queue) wayland_process_acquire();
+        if ((ret = wl_display_dispatch_queue_pending(process_wl_display, queue)) == -1)
+            TRACE("... failed wl_display_dispatch_queue_pending errno=%d\n", errno);
+        if (is_process_queue) wayland_process_release();
+        TRACE("... done early\n");
+        return ret;
+    }
+
+    while (TRUE)
+    {
+        ret = wl_display_flush(process_wl_display);
+
+        if (ret != -1 || errno != EAGAIN)
+            break;
+
+        pfd.events = POLLOUT;
+        while ((ret = poll(&pfd, 1, timeout_ms)) == -1 && errno == EINTR) continue;
+
+        if (ret == -1)
+        {
+            TRACE("... failed poll out errno=%d\n", errno);
+            wl_display_cancel_read(process_wl_display);
+            return -1;
+        }
+    }
+
+    if (ret < 0 && errno != EPIPE)
+    {
+        wl_display_cancel_read(process_wl_display);
+        return -1;
+    }
+
+    pfd.events = POLLIN;
+    while ((ret = poll(&pfd, 1, timeout_ms)) == -1 && errno == EINTR) continue;
+
+    if (ret == 0)
+    {
+        TRACE("... done => 0 events (timeout)\n");
+        wl_display_cancel_read(process_wl_display);
+        return 0;
+    }
+
+    if (ret == -1)
+    {
+        TRACE("... failed poll errno=%d\n", errno);
+        wl_display_cancel_read(process_wl_display);
+        return -1;
+    }
+
+    if (wl_display_read_events(process_wl_display) == -1)
+    {
+        TRACE("... failed wl_display_read_events errno=%d\n", errno);
+        return -1;
+    }
+
+    if (is_process_queue) wayland_process_acquire();
+    ret = wl_display_dispatch_queue_pending(process_wl_display, queue);
+    if (is_process_queue) wayland_process_release();
+    if (ret == -1)
+    {
+        TRACE("... failed wl_display_dispatch_queue_pending errno=%d\n", errno);
+        return -1;
+    }
+
+    TRACE("... done => %d events\n", ret);
+
+    return ret;
 }

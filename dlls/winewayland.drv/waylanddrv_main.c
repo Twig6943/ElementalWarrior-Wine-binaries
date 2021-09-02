@@ -85,6 +85,7 @@ static const struct user_driver_funcs waylanddrv_funcs =
 {
     .pCreateWindow = WAYLAND_CreateWindow,
     .pThreadDetach = WAYLAND_ThreadDetach,
+    .pUpdateDisplayDevices = WAYLAND_UpdateDisplayDevices,
 };
 
 static const struct user_driver_funcs null_funcs = { 0 };

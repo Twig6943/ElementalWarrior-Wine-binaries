@@ -4,6 +4,7 @@ UNIX_CFLAGS = $(WAYLAND_CLIENT_CFLAGS)
 UNIX_LIBS = -lwin32u $(WAYLAND_CLIENT_LIBS) $(PTHREAD_LIBS)
 
 C_SRCS = \
+	display.c \
 	dllmain.c \
 	wayland.c \
 	wayland_mutex.c \

@@ -99,6 +99,15 @@ static void registry_handle_global_remove(void *data, struct wl_registry *regist
         {
             TRACE("removing output->name=%s\n", output->name);
             wayland_output_destroy(output);
+            if (wayland_is_process(wayland))
+            {
+                /* Temporarily release the per-process instance lock, so that
+                 * wayland_init_display_devices can perform more fine grained
+                 * locking to avoid deadlocks. */
+                wayland_process_release();
+                wayland_init_display_devices();
+                wayland_process_acquire();
+            }
             return;
         }
     }

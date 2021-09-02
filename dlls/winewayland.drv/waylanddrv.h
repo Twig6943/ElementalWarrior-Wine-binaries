@@ -32,9 +32,11 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "wingdi.h"
 #include "ntuser.h"
 
 #include "unixlib.h"
+#include "wine/gdi_driver.h"
 
 /**********************************************************************
  *          Globals
@@ -134,6 +136,7 @@ void wayland_deinit(struct wayland *wayland) DECLSPEC_HIDDEN;
 BOOL wayland_is_process(struct wayland *wayland) DECLSPEC_HIDDEN;
 struct wayland *wayland_process_acquire(void) DECLSPEC_HIDDEN;
 void wayland_process_release(void) DECLSPEC_HIDDEN;
+void wayland_init_display_devices(void) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Wayland mutex
@@ -158,5 +161,7 @@ void wayland_output_use_xdg_extension(struct wayland_output *output) DECLSPEC_HI
  */
 
 BOOL WAYLAND_CreateWindow(HWND hwnd) DECLSPEC_HIDDEN;
+BOOL WAYLAND_UpdateDisplayDevices(const struct gdi_device_manager *device_manager,
+                                  BOOL force, void *param) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_WAYLANDDRV_H */

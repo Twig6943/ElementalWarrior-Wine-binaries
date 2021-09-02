@@ -169,6 +169,7 @@ BOOL wayland_init(struct wayland *wayland)
     }
 
     wl_list_init(&wayland->output_list);
+    wl_list_init(&wayland->detached_shm_buffer_list);
 
     /* Populate registry */
     wl_registry_add_listener(wayland->wl_registry, &registry_listener, wayland);
@@ -203,6 +204,7 @@ BOOL wayland_init(struct wayland *wayland)
 void wayland_deinit(struct wayland *wayland)
 {
     struct wayland_output *output, *output_tmp;
+    struct wayland_shm_buffer *shm_buffer, *shm_buffer_tmp;
 
     TRACE("%p\n", wayland);
 
@@ -212,6 +214,10 @@ void wayland_deinit(struct wayland *wayland)
 
     wl_list_for_each_safe(output, output_tmp, &wayland->output_list, link)
         wayland_output_destroy(output);
+
+    wl_list_for_each_safe(shm_buffer, shm_buffer_tmp,
+                          &wayland->detached_shm_buffer_list, link)
+        wayland_shm_buffer_destroy(shm_buffer);
 
     if (wayland->wl_shm)
         wl_shm_destroy(wayland->wl_shm);

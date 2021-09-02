@@ -9,6 +9,7 @@ C_SRCS = \
 	gdi.c \
 	unicode.c \
 	wayland.c \
+	wayland_buffer_queue.c \
 	wayland_mutex.c \
 	wayland_native_buffer.c \
 	wayland_output.c \

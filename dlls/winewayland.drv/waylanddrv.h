@@ -79,6 +79,7 @@ struct wayland
     struct zxdg_output_manager_v1 *zxdg_output_manager_v1;
     uint32_t next_fallback_output_id;
     struct wl_list output_list;
+    struct wl_list detached_shm_buffer_list;
 };
 
 struct wayland_output_mode
@@ -129,6 +130,18 @@ struct wayland_shm_buffer
     void *map_data;
     size_t map_size;
     BOOL busy;
+    HRGN damage_region;
+    BOOL destroy_on_release;
+};
+
+struct wayland_buffer_queue
+{
+    struct wayland *wayland;
+    struct wl_event_queue *wl_event_queue;
+    struct wl_list buffer_list;
+    int width;
+    int height;
+    enum wl_shm_format format;
     HRGN damage_region;
 };
 
@@ -223,6 +236,20 @@ void wayland_shm_buffer_add_damage(struct wayland_shm_buffer *shm_buffer, HRGN d
 void wayland_shm_buffer_copy(struct wayland_shm_buffer *dst_buffer,
                              struct wayland_shm_buffer *src_buffer,
                              HRGN region) DECLSPEC_HIDDEN;
+
+/**********************************************************************
+ *          Wayland buffer queue
+ */
+
+struct wayland_buffer_queue *wayland_buffer_queue_create(struct wayland *wayland,
+                                                         int width, int heigh,
+                                                         enum wl_shm_format format) DECLSPEC_HIDDEN;
+void wayland_buffer_queue_destroy(struct wayland_buffer_queue *queue) DECLSPEC_HIDDEN;
+struct wayland_shm_buffer *wayland_buffer_queue_acquire_buffer(struct wayland_buffer_queue *queue) DECLSPEC_HIDDEN;
+void wayland_buffer_queue_detach_buffer(struct wayland_buffer_queue *queue,
+                                        struct wayland_shm_buffer *shm_buffer,
+                                        BOOL destroy_on_release) DECLSPEC_HIDDEN;
+void wayland_buffer_queue_add_damage(struct wayland_buffer_queue *queue, HRGN damage) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Misc. helpers

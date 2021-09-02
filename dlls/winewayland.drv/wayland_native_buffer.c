@@ -24,7 +24,40 @@
 
 #include "waylanddrv.h"
 
+#include <assert.h>
 #include <unistd.h>
+
+/**********************************************************************
+ *          wayland_native_buffer_init_shm
+ *
+ * Deinitializes a native buffer, releasing any associated resources.
+ */
+BOOL wayland_native_buffer_init_shm(struct wayland_native_buffer *native,
+                                    int width, int height,
+                                    enum wl_shm_format format)
+{
+    int stride;
+    off_t size;
+    int fd;
+
+    assert(format == WL_SHM_FORMAT_ARGB8888 || format == WL_SHM_FORMAT_XRGB8888);
+
+    stride = width * 4;
+    size = stride * height;
+
+    fd = wayland_shmfd_create("wayland-shm", size);
+    if (fd < 0) return FALSE;
+
+    native->plane_count = 1;
+    native->fds[0] = fd;
+    native->strides[0] = stride;
+    native->offsets[0] = 0;
+    native->width = width;
+    native->height = height;
+    native->format = format;
+
+    return TRUE;
+}
 
 /**********************************************************************
  *          wayland_native_buffer_deinit

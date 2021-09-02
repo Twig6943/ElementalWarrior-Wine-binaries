@@ -85,6 +85,10 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
         wayland->wl_compositor =
             wl_registry_bind(registry, id, &wl_compositor_interface, 4);
     }
+    else if (strcmp(interface, "wl_shm") == 0)
+    {
+        wayland->wl_shm = wl_registry_bind(registry, id, &wl_shm_interface, 1);
+    }
 }
 
 static void registry_handle_global_remove(void *data, struct wl_registry *registry,
@@ -208,6 +212,9 @@ void wayland_deinit(struct wayland *wayland)
 
     wl_list_for_each_safe(output, output_tmp, &wayland->output_list, link)
         wayland_output_destroy(output);
+
+    if (wayland->wl_shm)
+        wl_shm_destroy(wayland->wl_shm);
 
     if (wayland->zxdg_output_manager_v1)
         zxdg_output_manager_v1_destroy(wayland->zxdg_output_manager_v1);

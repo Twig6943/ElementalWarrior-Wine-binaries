@@ -1345,9 +1345,16 @@ else
         [AC_CHECK_HEADERS([wayland-client.h])
          AC_CHECK_LIB(wayland-client,wl_display_connect,[:],
                       [WAYLAND_CLIENT_LIBS=""],[$WAYLAND_CLIENT_LIBS])])
+    WINE_PACKAGE_FLAGS(WAYLAND_PROTOCOLS, [wayland-protocols],,,,
+         [AC_SUBST(WAYLAND_PROTOCOLS_DATADIR,
+                   `$PKG_CONFIG --atleast-version=1.14 wayland-protocols && $PKG_CONFIG --variable=pkgdatadir wayland-protocols`)])
+    AC_PATH_PROG(WAYLAND_SCANNER,wayland-scanner,
+                 [`$PKG_CONFIG --variable=wayland_scanner wayland-scanner`])
 fi
-WINE_NOTICE_WITH(wayland, [test -z "$WAYLAND_CLIENT_LIBS"],
-                 [Wayland ${notice_platform}development files not found, the Wayland driver won't be supported.],
+WINE_NOTICE_WITH(wayland, [test -z "$WAYLAND_CLIENT_LIBS" ||
+                           test -z "$WAYLAND_PROTOCOLS_DATADIR" ||
+                           test -z "$WAYLAND_SCANNER"],
+                 [Wayland ${notice_platform}development files not found or not new enough, the Wayland driver won't be supported.],
                  [enable_winewayland_drv])
 
 dnl **** Check for OpenCL ****

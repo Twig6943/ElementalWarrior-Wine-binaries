@@ -30,6 +30,7 @@
 
 #include "ntuser.h"
 
+#include <assert.h>
 #include <stdlib.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
@@ -45,6 +46,12 @@ struct wayland_win_data
     RECT           window_rect;
     /* client area relative to parent */
     RECT           client_rect;
+    /* wayland surface (if any) representing this window on the wayland side */
+    struct wayland_surface *wayland_surface;
+    /* whether this window is visible */
+    BOOL           visible;
+    /* whether a wayland surface update is needed */
+    BOOL           wayland_surface_needs_update;
 };
 
 static struct wayland_mutex win_data_mutex =
@@ -67,6 +74,7 @@ static void wayland_win_data_destroy(struct wayland_win_data *data)
     TRACE("hwnd=%p\n", data->hwnd);
     win_data_context[context_idx(data->hwnd)] = NULL;
 
+    if (data->wayland_surface) wayland_surface_unref(data->wayland_surface);
     free(data);
 
     wayland_mutex_unlock(&win_data_mutex);
@@ -120,11 +128,155 @@ static struct wayland_win_data *wayland_win_data_create(HWND hwnd)
         return NULL;
 
     data->hwnd = hwnd;
+    data->wayland_surface_needs_update = TRUE;
 
     wayland_mutex_lock(&win_data_mutex);
     win_data_context[context_idx(hwnd)] = data;
 
     TRACE("hwnd=%p\n", data->hwnd);
+
+    return data;
+}
+
+/***********************************************************************
+ *           wayland_surface_for_hwnd_unlocked
+ *
+ * Helper function to get the wayland_surface for a HWND without any locking.
+ * The caller should ensure that win_data_mutex has been locked before this
+ * operation, and for as long as the association between the HWND and the
+ * returned wayland_surface needs to remain valid.
+ */
+static struct wayland_surface *wayland_surface_for_hwnd_unlocked(HWND hwnd)
+{
+    struct wayland_win_data *data;
+
+    assert(win_data_mutex.owner_tid == GetCurrentThreadId());
+
+    if ((data = win_data_context[context_idx(hwnd)]) && data->hwnd == hwnd)
+        return data->wayland_surface;
+
+    return NULL;
+}
+
+static BOOL wayland_win_data_wayland_surface_needs_update(struct wayland_win_data *data)
+{
+    if (data->wayland_surface_needs_update)
+        return TRUE;
+
+    /* If this is currently or potentially a toplevel surface, and its
+     * visibility state has changed, recreate win_data so that we only have
+     * xdg_toplevels for visible windows. */
+    if (data->wayland_surface && !data->wayland_surface->wl_subsurface)
+    {
+        BOOL visible = data->wayland_surface->xdg_toplevel != NULL;
+        if (data->visible != visible)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+static struct wayland_surface *update_surface_for_role(struct wayland_win_data *data,
+                                                       enum wayland_surface_role role,
+                                                       struct wayland *wayland,
+                                                       struct wayland_surface *parent_surface)
+{
+    struct wayland_surface *surface = data->wayland_surface;
+
+    if (!surface ||
+        (role != WAYLAND_SURFACE_ROLE_NONE &&
+         surface->role != WAYLAND_SURFACE_ROLE_NONE &&
+         surface->role != role))
+    {
+        surface = wayland_surface_create_plain(wayland);
+        if (surface) wayland_mutex_lock(&surface->mutex);
+        surface->hwnd = data->hwnd;
+    }
+    else
+    {
+        /* Lock the wayland surface to avoid other threads interacting with it
+         * while we are updating. */
+        wayland_mutex_lock(&surface->mutex);
+        wayland_surface_clear_role(surface);
+    }
+
+    if (role == WAYLAND_SURFACE_ROLE_TOPLEVEL)
+        wayland_surface_make_toplevel(surface, parent_surface);
+    else if (role == WAYLAND_SURFACE_ROLE_SUBSURFACE)
+        wayland_surface_make_subsurface(surface, parent_surface);
+
+    wayland_mutex_unlock(&surface->mutex);
+
+    return surface;
+}
+
+static void wayland_win_data_update_wayland_surface(struct wayland_win_data *data)
+{
+    struct wayland *wayland = thread_wayland();
+    HWND effective_parent_hwnd;
+    struct wayland_surface *surface;
+    struct wayland_surface *parent_surface;
+    DWORD style;
+
+    TRACE("hwnd=%p\n", data->hwnd);
+
+    data->wayland_surface_needs_update = FALSE;
+
+    /* GWLP_HWNDPARENT gets the owner for any kind of toplevel windows,
+     * and the parent for child windows. */
+    effective_parent_hwnd = (HWND)NtUserGetWindowLongPtrW(data->hwnd, GWLP_HWNDPARENT);
+    parent_surface = NULL;
+
+    if (effective_parent_hwnd)
+        parent_surface = wayland_surface_for_hwnd_unlocked(effective_parent_hwnd);
+
+    style = NtUserGetWindowLongW(data->hwnd, GWL_STYLE);
+
+    /* Use wayland subsurfaces for children windows and windows that are
+     * transient (i.e., don't have a titlebar). Otherwise, if the window is
+     * visible make it wayland toplevel. Finally, if the window is not visible
+     * create a plain (without a role) surface to avoid polluting the
+     * compositor with empty xdg_toplevels. */
+    if ((style & WS_CAPTION) != WS_CAPTION)
+    {
+        surface = update_surface_for_role(data, WAYLAND_SURFACE_ROLE_SUBSURFACE,
+                                          wayland, parent_surface);
+    }
+    else if (data->visible)
+    {
+        surface = update_surface_for_role(data, WAYLAND_SURFACE_ROLE_TOPLEVEL,
+                                          wayland, parent_surface);
+    }
+    else
+    {
+        surface = update_surface_for_role(data, WAYLAND_SURFACE_ROLE_NONE,
+                                          wayland, parent_surface);
+    }
+
+    if (data->wayland_surface != surface)
+    {
+        if (data->wayland_surface)
+            wayland_surface_unref(data->wayland_surface);
+        data->wayland_surface = surface;
+    }
+}
+
+static struct wayland_win_data *update_wayland_state(struct wayland_win_data *data)
+{
+    HWND hwnd = data->hwnd;
+
+    /* Ensure we have a thread wayland instance. Perform the initialization
+     * outside the win_data lock to avoid potential deadlocks. */
+    if (!thread_wayland())
+    {
+        wayland_win_data_release(data);
+        thread_init_wayland();
+        data = wayland_win_data_get(hwnd);
+        if (!data) return NULL;
+    }
+
+    if (wayland_win_data_wayland_surface_needs_update(data))
+        wayland_win_data_update_wayland_surface(data);
 
     return data;
 }
@@ -180,9 +332,34 @@ BOOL WAYLAND_WindowPosChanging(HWND hwnd, HWND insert_after, UINT swp_flags,
     data->parent = (parent == NtUserGetDesktopWindow()) ? 0 : parent;
     data->window_rect = *window_rect;
     data->client_rect = *client_rect;
+    data->visible = ((style & WS_VISIBLE) == WS_VISIBLE ||
+                     (swp_flags & SWP_SHOWWINDOW)) &&
+                    !(swp_flags & SWP_HIDEWINDOW);
 
     wayland_win_data_release(data);
     return TRUE;
+}
+
+/***********************************************************************
+ *           WAYLAND_WindowPosChanged
+ */
+void WAYLAND_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
+                              const RECT *window_rect, const RECT *client_rect,
+                              const RECT *visible_rect, const RECT *valid_rects,
+                              struct window_surface *surface)
+{
+    struct wayland_win_data *data;
+
+    if (!(data = wayland_win_data_get(hwnd))) return;
+
+    TRACE("hwnd %p window %s client %s visible %s style %08x after %p flags %08x\n",
+          hwnd, wine_dbgstr_rect(window_rect), wine_dbgstr_rect(client_rect),
+          wine_dbgstr_rect(visible_rect), (UINT)NtUserGetWindowLongW(hwnd, GWL_STYLE),
+          insert_after, swp_flags);
+
+    data = update_wayland_state(data);
+
+    wayland_win_data_release(data);
 }
 
 static void handle_wm_wayland_monitor_change(struct wayland *wayland)

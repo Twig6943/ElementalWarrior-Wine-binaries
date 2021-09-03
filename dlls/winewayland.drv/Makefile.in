@@ -18,6 +18,7 @@ C_SRCS = \
 	wayland_surface.c \
 	waylanddrv_main.c \
 	window.c \
+	window_surface.c \
 
 WAYLAND_PROTOCOL_SRCS = \
 	$(WAYLAND_PROTOCOLS_DATADIR)/stable/xdg-shell/xdg-shell.xml \

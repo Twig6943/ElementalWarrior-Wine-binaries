@@ -323,6 +323,16 @@ void wayland_buffer_queue_detach_buffer(struct wayland_buffer_queue *queue,
 void wayland_buffer_queue_add_damage(struct wayland_buffer_queue *queue, HRGN damage) DECLSPEC_HIDDEN;
 
 /**********************************************************************
+ *          Wayland window surface
+ */
+
+struct window_surface *wayland_window_surface_create(HWND hwnd, const RECT *rect) DECLSPEC_HIDDEN;
+void wayland_window_surface_flush(struct window_surface *window_surface) DECLSPEC_HIDDEN;
+BOOL wayland_window_surface_needs_flush(struct window_surface *surface) DECLSPEC_HIDDEN;
+void wayland_window_surface_update_wayland_surface(struct window_surface *surface,
+                                                   struct wayland_surface *wayland_surface) DECLSPEC_HIDDEN;
+
+/**********************************************************************
  *          Misc. helpers
  */
 

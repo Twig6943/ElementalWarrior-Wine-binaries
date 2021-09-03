@@ -28,6 +28,8 @@
 
 #include "wine/debug.h"
 
+#include "winuser.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -508,4 +510,77 @@ int wayland_dispatch_queue(struct wl_event_queue *queue, int timeout_ms)
 BOOL wayland_read_events_and_dispatch_process(void)
 {
     return (wayland_dispatch_queue(process_wayland->wl_event_queue, -1) != -1);
+}
+
+static int wayland_dispatch_thread_pending(struct wayland *wayland)
+{
+    char buf[64];
+
+    TRACE("wayland=%p queue=%p\n", wayland, wayland->wl_event_queue);
+
+    wl_display_flush(wayland->wl_display);
+
+    /* Consume notifications */
+    while (TRUE)
+    {
+        int ret = read(wayland->event_notification_pipe[0], buf, sizeof(buf));
+        if (ret > 0) continue;
+        if (ret == -1)
+        {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN) break; /* no data to read */
+            ERR("failed to read from notification pipe: %s\n", strerror(errno));
+            break;
+        }
+        if (ret == 0)
+        {
+            ERR("failed to read from notification pipe: pipe is closed\n");
+            break;
+        }
+    }
+
+    return wl_display_dispatch_queue_pending(wayland->wl_display,
+                                             wayland->wl_event_queue);
+}
+
+static BOOL wayland_process_thread_events(struct wayland *wayland, DWORD mask)
+{
+    int dispatched;
+
+    wayland->last_dispatch_mask = 0;
+    wayland->processing_events = TRUE;
+
+    dispatched = wayland_dispatch_thread_pending(wayland);
+
+    wayland->processing_events = FALSE;
+
+    TRACE("dispatched=%d mask=%s%s%s%s%s%s%s\n",
+          dispatched,
+          (wayland->last_dispatch_mask & QS_KEY) ? "QS_KEY|" : "",
+          (wayland->last_dispatch_mask & QS_MOUSEMOVE) ? "QS_MOUSEMOVE|" : "",
+          (wayland->last_dispatch_mask & QS_MOUSEBUTTON) ? "QS_MOUSEBUTTON|" : "",
+          (wayland->last_dispatch_mask & QS_INPUT) ? "QS_INPUT|" : "",
+          (wayland->last_dispatch_mask & QS_PAINT) ? "QS_PAINT|" : "",
+          (wayland->last_dispatch_mask & QS_POSTMESSAGE) ? "QS_POSTMESSAGE|" : "",
+          (wayland->last_dispatch_mask & QS_SENDMESSAGE) ? "QS_SENDMESSAGE|" : "");
+
+    return wayland->last_dispatch_mask & mask;
+}
+
+/***********************************************************************
+ *           WAYLAND_ProcessEvents
+ */
+BOOL WAYLAND_ProcessEvents(DWORD mask)
+{
+    struct wayland *wayland = thread_wayland();
+
+    if (!wayland) return FALSE;
+
+    if (wayland->processing_events)
+    {
+        wl_display_flush(wayland->wl_display);
+        return FALSE;
+    }
+
+    return wayland_process_thread_events(wayland, mask);
 }

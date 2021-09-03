@@ -98,6 +98,8 @@ struct wayland
     uint32_t next_fallback_output_id;
     struct wl_list output_list;
     struct wl_list detached_shm_buffer_list;
+    DWORD last_dispatch_mask;
+    BOOL processing_events;
     int event_notification_pipe[2];
 };
 
@@ -392,6 +394,7 @@ void WAYLAND_DestroyWindow(HWND hwnd) DECLSPEC_HIDDEN;
 BOOL WAYLAND_GetCurrentDisplaySettings(LPCWSTR name, BOOL is_primary,
                                        LPDEVMODEW devmode) DECLSPEC_HIDDEN;
 INT WAYLAND_GetDisplayDepth(LPCWSTR name, BOOL is_primary) DECLSPEC_HIDDEN;
+BOOL WAYLAND_ProcessEvents(DWORD mask) DECLSPEC_HIDDEN;
 BOOL WAYLAND_UpdateDisplayDevices(const struct gdi_device_manager *device_manager,
                                   BOOL force, void *param) DECLSPEC_HIDDEN;
 LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) DECLSPEC_HIDDEN;

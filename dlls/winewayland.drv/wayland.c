@@ -29,8 +29,10 @@
 #include "wine/debug.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
@@ -159,10 +161,13 @@ static const struct wl_registry_listener registry_listener = {
 BOOL wayland_init(struct wayland *wayland)
 {
     struct wl_display *wl_display_wrapper;
+    int flags;
 
     TRACE("wayland=%p wl_display=%p\n", wayland, process_wl_display);
 
     wl_list_init(&wayland->thread_link);
+    wayland->event_notification_pipe[0] = -1;
+    wayland->event_notification_pipe[1] = -1;
 
     wayland->process_id = GetCurrentProcessId();
     wayland->thread_id = GetCurrentThreadId();
@@ -212,6 +217,16 @@ BOOL wayland_init(struct wayland *wayland)
 
     if (!wayland_is_process(wayland))
     {
+        /* Thread wayland instances have notification pipes to inform them when
+         * there might be new events in their queues. The read part of the pipe
+         * is also used as the wine server queue fd. */
+        if (pipe2(wayland->event_notification_pipe, O_CLOEXEC) == -1)
+            return FALSE;
+        /* Make just the read end non-blocking */
+        if ((flags = fcntl(wayland->event_notification_pipe[0], F_GETFL)) == -1)
+            return FALSE;
+        if (fcntl(wayland->event_notification_pipe[0], F_SETFL, flags | O_NONBLOCK) == -1)
+            return FALSE;
         /* Keep a list of all thread wayland instances. */
         wayland_mutex_lock(&thread_wayland_mutex);
         wl_list_insert(&thread_wayland_list, &wayland->thread_link);
@@ -238,6 +253,11 @@ void wayland_deinit(struct wayland *wayland)
     wayland_mutex_lock(&thread_wayland_mutex);
     wl_list_remove(&wayland->thread_link);
     wayland_mutex_unlock(&thread_wayland_mutex);
+
+    if (wayland->event_notification_pipe[0] >= 0)
+        close(wayland->event_notification_pipe[0]);
+    if (wayland->event_notification_pipe[1] >= 0)
+        close(wayland->event_notification_pipe[1]);
 
     wl_list_for_each_safe(output, output_tmp, &wayland->output_list, link)
         wayland_output_destroy(output);
@@ -320,6 +340,28 @@ struct wayland *wayland_process_acquire(void)
 void wayland_process_release(void)
 {
     wayland_mutex_unlock(&process_wayland_mutex);
+}
+
+static void wayland_notify_threads(void)
+{
+    struct wayland *w;
+    int ret;
+
+    wayland_mutex_lock(&thread_wayland_mutex);
+
+    wl_list_for_each(w, &thread_wayland_list, thread_link)
+    {
+        while ((ret = write(w->event_notification_pipe[1], "a", 1)) != 1)
+        {
+            if (ret == -1 && errno != EINTR)
+            {
+                ERR("failed to write to notification pipe: %s\n", strerror(errno));
+                break;
+            }
+        }
+    }
+
+    wayland_mutex_unlock(&thread_wayland_mutex);
 }
 
 /**********************************************************************
@@ -444,7 +486,26 @@ int wayland_dispatch_queue(struct wl_event_queue *queue, int timeout_ms)
         return -1;
     }
 
+    /* We may have read and queued events in queues other than the specified
+     * one, so we need to notify threads (see wayland_read_events). */
+    wayland_notify_threads();
+
     TRACE("... done => %d events\n", ret);
 
     return ret;
+}
+
+/**********************************************************************
+ *          wayland_read_events_and_dispatch_process
+ *
+ * Read wayland events from the compositor, place them in their proper
+ * event queues, dispatch any events for the per-process wayland instance,
+ * and notify threads about the possibility of new per-thread wayland instance
+ * events (without dispatching them).
+ *
+ * Returns whether the operation succeeded.
+ */
+BOOL wayland_read_events_and_dispatch_process(void)
+{
+    return (wayland_dispatch_queue(process_wayland->wl_event_queue, -1) != -1);
 }

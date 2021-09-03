@@ -30,11 +30,42 @@
 #include "waylanddrv.h"
 
 #include "wine/debug.h"
+#include "wine/server.h"
 
 #include <stdlib.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
+
+static void set_queue_fd(struct wayland *wayland)
+{
+    HANDLE handle;
+    int wfd;
+    int ret;
+
+    wfd = wayland->event_notification_pipe[0];
+
+    if (wine_server_fd_to_handle(wfd, GENERIC_READ | SYNCHRONIZE, 0, &handle))
+    {
+        ERR("Can't allocate handle for wayland fd\n");
+        NtTerminateProcess(0, 1);
+    }
+
+    SERVER_START_REQ(set_queue_fd)
+    {
+        req->handle = wine_server_obj_handle(handle);
+        ret = wine_server_call(req);
+    }
+    SERVER_END_REQ;
+
+    if (ret)
+    {
+        ERR("Can't store handle for wayland fd %x\n", ret);
+        NtTerminateProcess(0, 1);
+    }
+
+    NtClose(handle);
+}
 
 /***********************************************************************
  *           Initialize per thread data
@@ -59,6 +90,7 @@ struct wayland_thread_data *wayland_init_thread_data(void)
         NtTerminateProcess(0, 1);
     }
 
+    set_queue_fd(&data->wayland);
     NtUserGetThreadInfo()->driver_data = (UINT_PTR)data;
 
     return data;
@@ -111,9 +143,18 @@ err:
     return STATUS_UNSUCCESSFUL;
 }
 
+static NTSTATUS waylanddrv_unix_read_events(void *arg)
+{
+    while (wayland_read_events_and_dispatch_process()) continue;
+    /* This function only returns on a fatal error, e.g., if our connection
+     * to the Wayland server is lost. */
+    return STATUS_UNSUCCESSFUL;
+}
+
 const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     waylanddrv_unix_init,
+    waylanddrv_unix_read_events,
 };
 
 C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == waylanddrv_unix_func_count);
@@ -123,6 +164,7 @@ C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == waylanddrv_unix_func_count);
 const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
 {
     waylanddrv_unix_init,
+    waylanddrv_unix_read_events,
 };
 
 C_ASSERT(ARRAYSIZE(__wine_unix_call_wow64_funcs) == waylanddrv_unix_func_count);

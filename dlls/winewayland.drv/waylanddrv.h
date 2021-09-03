@@ -98,6 +98,7 @@ struct wayland
     uint32_t next_fallback_output_id;
     struct wl_list output_list;
     struct wl_list detached_shm_buffer_list;
+    int event_notification_pipe[2];
 };
 
 struct wayland_output_mode
@@ -255,6 +256,7 @@ struct wayland_output *wayland_output_get_by_wine_name(struct wayland *wayland,
  */
 
 int wayland_dispatch_queue(struct wl_event_queue *queue, int timeout_ms) DECLSPEC_HIDDEN;
+BOOL wayland_read_events_and_dispatch_process(void) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Wayland surface

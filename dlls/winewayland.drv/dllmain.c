@@ -20,8 +20,19 @@
 
 #include "waylanddrv_dll.h"
 
+static DWORD WINAPI wayland_read_events_thread(void *arg)
+{
+    WAYLANDDRV_UNIX_CALL(read_events, NULL);
+    /* This thread terminates only if an unrecoverable error occured during
+     * event reading. */
+    TerminateProcess(GetCurrentProcess(), 1);
+    return 0;
+}
+
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 {
+    DWORD tid;
+
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
 
     DisableThreadLibraryCalls(instance);
@@ -29,6 +40,9 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 
     if (WAYLANDDRV_UNIX_CALL(init, NULL))
         return FALSE;
+
+    /* Read wayland events from a dedicated thread. */
+    CreateThread(NULL, 0, wayland_read_events_thread, NULL, 0, &tid);
 
     return TRUE;
 }

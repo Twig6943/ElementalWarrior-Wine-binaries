@@ -27,6 +27,7 @@
 #include "waylanddrv.h"
 #include "wine/debug.h"
 #include "ntgdi.h"
+#include "ntuser.h"
 
 #include <stdlib.h>
 
@@ -439,6 +440,31 @@ void wayland_surface_unmap(struct wayland_surface *surface)
 }
 
 /**********************************************************************
+ *          wayland_surface_coords_to_screen
+ *
+ * Converts the surface-local coordinates to Windows screen coordinates.
+ */
+void wayland_surface_coords_to_screen(struct wayland_surface *surface,
+                                      double wayland_x, double wayland_y,
+                                      int *screen_x, int *screen_y)
+{
+    RECT window_rect = {0};
+    int wine_x, wine_y;
+
+    wayland_surface_coords_to_wine(surface, wayland_x, wayland_y,
+                                   &wine_x, &wine_y);
+
+    NtUserGetWindowRect(surface->hwnd, &window_rect);
+
+    *screen_x = wine_x + window_rect.left;
+    *screen_y = wine_y + window_rect.top;
+
+    TRACE("hwnd=%p wayland=%.2f,%.2f rect=%s => screen=%d,%d\n",
+          surface->hwnd, wayland_x, wayland_y, wine_dbgstr_rect(&window_rect),
+          *screen_x, *screen_y);
+}
+
+/**********************************************************************
  *          wayland_surface_coords_from_wine
  *
  * Converts the window-local wine coordinates to wayland surface-local coordinates.
@@ -465,6 +491,19 @@ void wayland_surface_coords_rounded_from_wine(struct wayland_surface *surface,
     wayland_surface_coords_from_wine(surface, wine_x, wine_y, &w_x, &w_y);
     *wayland_x = round(w_x);
     *wayland_y = round(w_y);
+}
+
+/**********************************************************************
+ *          wayland_surface_coords_to_wine
+ *
+ * Converts the surface-local coordinates to wine windows-local coordinates.
+ */
+void wayland_surface_coords_to_wine(struct wayland_surface *surface,
+                                    double wayland_x, double wayland_y,
+                                    int *wine_x, int *wine_y)
+{
+    *wine_x = round(wayland_x);
+    *wine_y = round(wayland_y);
 }
 
 /**********************************************************************

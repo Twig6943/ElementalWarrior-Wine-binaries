@@ -43,9 +43,8 @@
 #include "ntuser.h"
 
 #include <linux/input.h>
+#include <sys/mman.h>
 #include <unistd.h>
-
-#include "wayland_keyboard_layout.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(keyboard);
 WINE_DECLARE_DEBUG_CHANNEL(key);
@@ -53,15 +52,15 @@ WINE_DECLARE_DEBUG_CHANNEL(key);
 static DWORD _xkb_keycode_to_scancode(struct wayland_keyboard *keyboard,
                                       xkb_keycode_t xkb_keycode)
 {
-    /* Use linux input keycode as scan code for now. */
-    return xkb_keycode - 8;
+    return xkb_keycode < ARRAY_SIZE(keyboard->xkb_keycode_to_scancode) ?
+           keyboard->xkb_keycode_to_scancode[xkb_keycode] : 0;
 }
 
 static UINT _xkb_keycode_to_vkey(struct wayland_keyboard *keyboard,
                                  xkb_keycode_t xkb_keycode)
 {
-    return xkb_keycode < ARRAY_SIZE(xkb_keycode_to_vkey_us) ?
-           xkb_keycode_to_vkey_us[xkb_keycode] : 0;
+    return xkb_keycode < ARRAY_SIZE(keyboard->xkb_keycode_to_vkey) ?
+           keyboard->xkb_keycode_to_vkey[xkb_keycode] : 0;
 }
 
 /* xkb keycodes are offset by 8 from linux input keycodes. */
@@ -164,6 +163,40 @@ static BOOL wayland_keyboard_emit(struct wayland_keyboard *keyboard, uint32_t ke
 static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard,
                                    uint32_t format, int fd, uint32_t size)
 {
+    struct wayland *wayland = data;
+    struct xkb_keymap *xkb_keymap = NULL;
+    struct xkb_state *xkb_state = NULL;
+    char *keymap_str;
+
+    TRACE("format=%d fd=%d size=%d\n", format, fd, size);
+
+    if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 ||
+        !wayland->keyboard.xkb_context)
+        goto out;
+
+    keymap_str = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (keymap_str == MAP_FAILED)
+        goto out;
+
+    xkb_keymap = xkb_keymap_new_from_string(wayland->keyboard.xkb_context,
+                                            keymap_str,
+                                            XKB_KEYMAP_FORMAT_TEXT_V1,
+                                            0);
+    munmap(keymap_str, size);
+    if (!xkb_keymap)
+        goto out;
+
+    xkb_state = xkb_state_new(xkb_keymap);
+    xkb_keymap_unref(xkb_keymap);
+    if (!xkb_state)
+        goto out;
+
+    xkb_state_unref(wayland->keyboard.xkb_state);
+    wayland->keyboard.xkb_state = xkb_state;
+
+    wayland_keyboard_update_layout(&wayland->keyboard);
+
+out:
     close(fd);
 }
 
@@ -352,14 +385,20 @@ static void keyboard_handle_modifiers(void *data, struct wl_keyboard *keyboard,
                                       uint32_t group)
 {
     struct wayland *wayland = data;
+    uint32_t last_group;
 
     TRACE("depressed=0x%x latched=0x%x locked=0x%x group=%d\n",
           mods_depressed, mods_latched, mods_locked, group);
 
     if (!wayland->keyboard.xkb_state) return;
 
+    last_group = _xkb_state_get_active_layout(wayland->keyboard.xkb_state);
+
     xkb_state_update_mask(wayland->keyboard.xkb_state,
                           mods_depressed, mods_latched, mods_locked, 0, 0, group);
+
+    if (group != last_group)
+        wayland_keyboard_update_layout(&wayland->keyboard);
 
     /* TODO: Sync wine modifier state with XKB modifier state. */
 }

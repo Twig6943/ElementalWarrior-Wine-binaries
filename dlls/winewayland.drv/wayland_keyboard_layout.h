@@ -30,258 +30,238 @@
 #ifndef __WINE_WAYLANDDRV_WAYLAND_KEYBOARD_LAYOUT_H
 #define __WINE_WAYLANDDRV_WAYLAND_KEYBOARD_LAYOUT_H
 
-static const UINT xkb_keycode_to_vkey_us[] =
+#define MAIN_KEY_LEN 50
+/* We currently use two symbols (levels) per key to differentiate layouts. */
+#define MAIN_KEY_SYMBOLS_LEN 2
+
+/* Windows uses PS/2 scan code set 1 for the scan codes sent to applications. */
+static const WORD main_key_scan_ps2_set1[MAIN_KEY_LEN] =
 {
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0,                   /* KEY_RESERVED  0 */
-    VK_ESCAPE,           /* KEY_ESC   1 */
-    '1',                 /* KEY_1   2 */
-    '2',                 /* KEY_2   3 */
-    '3',                 /* KEY_3   4 */
-    '4',                 /* KEY_4   5 */
-    '5',                 /* KEY_5   6 */
-    '6',                 /* KEY_6   7 */
-    '7',                 /* KEY_7   8 */
-    '8',                 /* KEY_8   9 */
-    '9',                 /* KEY_9   10 */
-    '0',                 /* KEY_0   11 */
-    VK_OEM_MINUS,        /* KEY_MINUS  12 */
-    VK_OEM_PLUS,         /* KEY_EQUAL  13 */
-    VK_BACK,             /* KEY_BACKSPACE 14 */
-    VK_TAB,              /* KEY_TAB   15 */
-    'Q',                 /* KEY_Q   16 */
-    'W',                 /* KEY_W   17 */
-    'E',                 /* KEY_E   18 */
-    'R',                 /* KEY_R   19 */
-    'T',                 /* KEY_T   20 */
-    'Y',                 /* KEY_Y   21 */
-    'U',                 /* KEY_U   22 */
-    'I',                 /* KEY_I   23 */
-    'O',                 /* KEY_O   24 */
-    'P',                 /* KEY_P   25 */
-    VK_OEM_4,            /* KEY_LEFTBRACE  26 */
-    VK_OEM_6,            /* KEY_RIGHTBRACE  27 */
-    VK_RETURN,           /* KEY_ENTER  28 */
-    VK_LCONTROL,         /* KEY_LEFTCTRL  29 */
-    'A',                 /* KEY_A   30 */
-    'S',                 /* KEY_S   31 */
-    'D',                 /* KEY_D   32 */
-    'F',                 /* KEY_F   33 */
-    'G',                 /* KEY_G   34 */
-    'H',                 /* KEY_H   35 */
-    'J',                 /* KEY_J   36 */
-    'K',                 /* KEY_K   37 */
-    'L',                 /* KEY_L   38 */
-    VK_OEM_1,            /* KEY_SEMICOLON  39 */
-    VK_OEM_7,            /* KEY_APOSTROPHE  40 */
-    VK_OEM_3,            /* KEY_GRAVE  41 */
-    VK_LSHIFT,           /* KEY_LEFTSHIFT  42 */
-    VK_OEM_5,            /* KEY_BACKSLASH  43 */
-    'Z',                 /* KEY_Z   44 */
-    'X',                 /* KEY_X   45 */
-    'C',                 /* KEY_C   46 */
-    'V',                 /* KEY_V   47 */
-    'B',                 /* KEY_B   48 */
-    'N',                 /* KEY_N   49 */
-    'M',                 /* KEY_M   50 */
-    VK_OEM_COMMA,        /* KEY_COMMA  51 */
-    VK_OEM_PERIOD,       /* KEY_DOT   52 */
-    VK_OEM_2,            /* KEY_SLASH  53 */
-    VK_RSHIFT,           /* KEY_RIGHTSHIFT  54 */
-    VK_MULTIPLY,         /* KEY_KPASTERISK  55 */
-    VK_LMENU,            /* KEY_LEFTALT  56 */
-    VK_SPACE,            /* KEY_SPACE  57 */
-    VK_CAPITAL,          /* KEY_CAPSLOCK  58 */
-    VK_F1,               /* KEY_F1   59 */
-    VK_F2,               /* KEY_F2   60 */
-    VK_F3,               /* KEY_F3   61 */
-    VK_F4,               /* KEY_F4   62 */
-    VK_F5,               /* KEY_F5   63 */
-    VK_F6,               /* KEY_F6   64 */
-    VK_F7,               /* KEY_F7   65 */
-    VK_F8,               /* KEY_F8   66 */
-    VK_F9,               /* KEY_F9   67 */
-    VK_F10,              /* KEY_F10   68 */
-    VK_NUMLOCK,          /* KEY_NUMLOCK  69 */
-    VK_SCROLL,           /* KEY_SCROLLLOCK  70 */
-    VK_HOME,             /* KEY_KP7   71 */
-    VK_UP,               /* KEY_KP8   72 */
-    VK_PRIOR,            /* KEY_KP9   73 */
-    VK_SUBTRACT,         /* KEY_KPMINUS  74 */
-    VK_LEFT,             /* KEY_KP4   75 */
-    VK_CLEAR,            /* KEY_KP5   76 */
-    VK_RIGHT,            /* KEY_KP6   77 */
-    VK_ADD,              /* KEY_KPPLUS  78 */
-    VK_END,              /* KEY_KP1   79 */
-    VK_DOWN,             /* KEY_KP2   80 */
-    VK_NEXT,             /* KEY_KP3   81 */
-    VK_INSERT,           /* KEY_KP0   82 */
-    VK_DELETE,           /* KEY_KPDOT  83 */
-    0,                   /* 84 */
-    0,                   /* KEY_ZENKAKUHANKAKU 85 */
-    VK_OEM_102,          /* KEY_102ND  86 */
-    VK_F11,              /* KEY_F11   87 */
-    VK_F12,              /* KEY_F12   88 */
-    0,                   /* KEY_RO   89 */
-    0,                   /* KEY_KATAKANA  90 */
-    0,                   /* KEY_HIRAGANA  91 */
-    0,                   /* KEY_HENKAN  92 */
-    0,                   /* KEY_KATAKANAHIRAGANA 93 */
-    0,                   /* KEY_MUHENKAN  94 */
-    0,                   /* KEY_KPJPCOMMA  95 */
-    VK_RETURN,           /* KEY_KPENTER  96 */
-    VK_RCONTROL,         /* KEY_RIGHTCTRL  97 */
-    VK_DIVIDE,           /* KEY_KPSLASH  98 */
-    VK_SNAPSHOT,         /* KEY_SYSRQ  99 */
-    VK_RMENU,            /* KEY_RIGHTALT  100 */
-    0,                   /* KEY_LINEFEED  101 */
-    VK_HOME,             /* KEY_HOME  102 */
-    VK_UP,               /* KEY_UP   103 */
-    VK_PRIOR,            /* KEY_PAGEUP  104 */
-    VK_LEFT,             /* KEY_LEFT  105 */
-    VK_RIGHT,            /* KEY_RIGHT  106 */
-    VK_END,              /* KEY_END   107 */
-    VK_DOWN,             /* KEY_DOWN  108 */
-    VK_NEXT,             /* KEY_PAGEDOWN  109 */
-    VK_INSERT,           /* KEY_INSERT  110 */
-    VK_DELETE,           /* KEY_DELETE  111 */
-    0,                   /* KEY_MACRO  112 */
-    VK_VOLUME_MUTE,      /* KEY_MUTE  113 */
-    VK_VOLUME_DOWN,      /* KEY_VOLUMEDOWN  114 */
-    VK_VOLUME_UP,        /* KEY_VOLUMEUP  115 */
-    0,                   /* KEY_POWER  116  */
-    0,                   /* KEY_KPEQUAL  117 */
-    0,                   /* KEY_KPPLUSMINUS  118 */
-    VK_PAUSE,            /* KEY_PAUSE  119 */
-    0,                   /* KEY_SCALE  120  */
-    0,                   /* KEY_KPCOMMA  121 */
-    0,                   /* KEY_HANGEUL  122 */
-    0,                   /* KEY_HANJA  123 */
-    0,                   /* KEY_YEN   124 */
-    VK_LWIN,             /* KEY_LEFTMETA  125 */
-    VK_RWIN,             /* KEY_RIGHTMETA  126 */
-    0,                   /* KEY_COMPOSE  127 */
-    0,                   /* KEY_STOP  128  */
-    0,                   /* KEY_AGAIN  129 */
-    0,                   /* KEY_PROPS  130  */
-    0,                   /* KEY_UNDO  131  */
-    0,                   /* KEY_FRONT  132 */
-    0,                   /* KEY_COPY  133  */
-    0,                   /* KEY_OPEN  134  */
-    0,                   /* KEY_PASTE  135  */
-    0,                   /* KEY_FIND  136  */
-    0,                   /* KEY_CUT   137  */
-    0,                   /* KEY_HELP  138  */
-    0,                   /* KEY_MENU  139  */
-    0,                   /* KEY_CALC  140  */
-    0,                   /* KEY_SETUP  141 */
-    0,                   /* KEY_SLEEP  142  */
-    0,                   /* KEY_WAKEUP  143  */
-    0,                   /* KEY_FILE  144  */
-    0,                   /* KEY_SENDFILE  145 */
-    0,                   /* KEY_DELETEFILE  146 */
-    0,                   /* KEY_XFER  147 */
-    0,                   /* KEY_PROG1  148 */
-    0,                   /* KEY_PROG2  149 */
-    0,                   /* KEY_WWW   150  */
-    0,                   /* KEY_MSDOS  151 */
-    0,                   /* KEY_COFFEE  152 */
-    0,                   /* KEY_ROTATE_DISPLAY 153  */
-    0,                   /* KEY_CYCLEWINDOWS 154 */
-    0,                   /* KEY_MAIL  155 */
-    0,                   /* KEY_BOOKMARKS  156  */
-    0,                   /* KEY_COMPUTER  157 */
-    0,                   /* KEY_BACK  158  */
-    0,                   /* KEY_FORWARD  159  */
-    0,                   /* KEY_CLOSECD  160 */
-    0,                   /* KEY_EJECTCD  161 */
-    0,                   /* KEY_EJECTCLOSECD 162 */
-    VK_MEDIA_NEXT_TRACK, /* KEY_NEXTSONG  163 */
-    VK_MEDIA_PLAY_PAUSE, /* KEY_PLAYPAUSE  164 */
-    VK_MEDIA_PREV_TRACK, /* KEY_PREVIOUSSONG 165 */
-    0,                   /* KEY_STOPCD  166 */
-    0,                   /* KEY_RECORD  167 */
-    0,                   /* KEY_REWIND  168 */
-    0,                   /* KEY_PHONE  169  */
-    0,                   /* KEY_ISO   170 */
-    0,                   /* KEY_CONFIG  171  */
-    0,                   /* KEY_HOMEPAGE  172  */
-    0,                   /* KEY_REFRESH  173  */
-    0,                   /* KEY_EXIT  174  */
-    0,                   /* KEY_MOVE  175 */
-    0,                   /* KEY_EDIT  176 */
-    0,                   /* KEY_SCROLLUP  177 */
-    0,                   /* KEY_SCROLLDOWN  178 */
-    0,                   /* KEY_KPLEFTPAREN  179 */
-    0,                   /* KEY_KPRIGHTPAREN 180 */
-    0,                   /* KEY_NEW   181  */
-    0,                   /* KEY_REDO  182  */
-    VK_F13,              /* KEY_F13   183 */
-    VK_F14,              /* KEY_F14   184 */
-    VK_F15,              /* KEY_F15   185 */
-    VK_F16,              /* KEY_F16   186 */
-    VK_F17,              /* KEY_F17   187 */
-    VK_F18,              /* KEY_F18   188 */
-    VK_F19,              /* KEY_F19   189 */
-    VK_F20,              /* KEY_F20   190 */
-    VK_F21,              /* KEY_F21   191 */
-    VK_F22,              /* KEY_F22   192 */
-    VK_F23,              /* KEY_F23   193 */
-    VK_F24,              /* KEY_F24   194 */
-    0,                   /* 195 */
-    0,                   /* 196 */
-    0,                   /* 197 */
-    0,                   /* 198 */
-    0,                   /* 199 */
-    0,                   /* KEY_PLAYCD  200 */
-    0,                   /* KEY_PAUSECD  201 */
-    0,                   /* KEY_PROG3  202 */
-    0,                   /* KEY_PROG4  203 */
-    0,                   /* KEY_DASHBOARD  204  */
-    0,                   /* KEY_SUSPEND  205 */
-    0,                   /* KEY_CLOSE  206  */
-    VK_PLAY,             /* KEY_PLAY  207 */
-    0,                   /* KEY_FASTFORWARD  208 */
-    0,                   /* KEY_BASSBOOST  209 */
-    VK_PRINT,            /* KEY_PRINT  210  */
-    0,                   /* KEY_HP   211 */
-    0,                   /* KEY_CAMERA  212 */
-    0,                   /* KEY_SOUND  213 */
-    0,                   /* KEY_QUESTION  214  */
-    0,                   /* KEY_EMAIL  215 */
-    0,                   /* KEY_CHAT  216 */
-    0,                   /* KEY_SEARCH  217 */
-    0,                   /* KEY_CONNECT  218 */
-    0,                   /* KEY_FINANCE  219  */
-    0,                   /* KEY_SPORT  220 */
-    0,                   /* KEY_SHOP  221 */
-    0,                   /* KEY_ALTERASE  222 */
-    0,                   /* KEY_CANCEL  223  */
-    0,                   /* KEY_BRIGHTNESSDOWN 224 */
-    0,                   /* KEY_BRIGHTNESSUP 225 */
-    0,                   /* KEY_MEDIA  226 */
-    0,                   /* KEY_SWITCHVIDEOMODE 227  */
-    0,                   /* KEY_KBDILLUMTOGGLE 228 */
-    0,                   /* KEY_KBDILLUMDOWN 229 */
-    0,                   /* KEY_KBDILLUMUP  230 */
-    0,                   /* KEY_SEND  231  */
-    0,                   /* KEY_REPLY  232  */
-    0,                   /* KEY_FORWARDMAIL  233  */
-    0,                   /* KEY_SAVE  234  */
-    0,                   /* KEY_DOCUMENTS  235 */
-    0,                   /* KEY_BATTERY  236 */
-    0,                   /* KEY_BLUETOOTH  237 */
-    0,                   /* KEY_WLAN  238 */
-    0,                   /* KEY_UWB   239  */
-    0,                   /* KEY_UNKNOWN  240 */
-    0,                   /* KEY_VIDEO_NEXT  241  */
-    0,                   /* KEY_VIDEO_PREV  242  */
-    0,                   /* KEY_BRIGHTNESS_CYCLE 243  */
-    0,                   /* KEY_BRIGHTNESS_AUTO/ZERO 244 */
-    0,                   /* KEY_DISPLAY_OFF  245  */
-    0,                   /* KEY_WWAN  246  */
-    0,                   /* KEY_RFKILL  247  */
-    0,                   /* KEY_MICMUTE  248  */
+    /* Row E: TLDE, AE01-AE13 */
+    0x29,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x7D,
+    /* Row D: AD01-AD12 */
+    0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,
+    /* Row C: AC01-AC12 */
+    0x1E,0x1F,0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x2B,
+    /* Row B: LSGT, AB01-AB11 */
+    0x56,0x2C,0x2D,0x2E,0x2F,0x30,0x31,0x32,0x33,0x34,0x35,0x73
+};
+
+static const WORD main_key_vkey_qwerty[MAIN_KEY_LEN] =
+{
+    /* NOTE: this layout must concur with the scan codes layout above */
+    VK_OEM_3,'1','2','3','4','5','6','7','8','9','0',VK_OEM_MINUS,VK_OEM_PLUS,0,
+    'Q','W','E','R','T','Y','U','I','O','P',VK_OEM_4,VK_OEM_6,
+    'A','S','D','F','G','H','J','K','L',VK_OEM_1,VK_OEM_7,VK_OEM_5,
+    VK_OEM_102,'Z','X','C','V','B','N','M',VK_OEM_COMMA,VK_OEM_PERIOD,VK_OEM_2,
+};
+
+#define K(x) XKB_KEY_##x
+
+static const xkb_keysym_t main_key_symbols_us[MAIN_KEY_LEN][MAIN_KEY_SYMBOLS_LEN] =
+{
+    /* Row E: TLDE, AE01-AE13 */
+    {'`', '~'}, {'1', '!'}, {'2', '@'}, {'3', '#'}, {'4', '$'}, {'5', '%'}, {'6', '^'}, {'7', '&'}, {'8', '*'}, {'9', '('}, {'0', ')'}, {'-', '_'}, {'=', '+'}, {},
+    /* Row D: AD01-AD12 */
+    {'q', 'Q'}, {'w', 'W'}, {'e', 'E'}, {'r', 'R'}, {'t', 'T'}, {'y', 'Y'}, {'u', 'U'}, {'i', 'I'}, {'o', 'O'}, {'p', 'P'}, {'[', '{'}, {']', '}'},
+    /* Row C: AC01-AC12 */
+    {'a', 'A'}, {'s', 'S'}, {'d', 'D'}, {'f', 'F'}, {'g', 'G'}, {'h', 'H'}, {'j', 'J'}, {'k', 'K'}, {'l', 'L'}, {';', ':'}, {'\'', '"'}, {'\\', '|'},
+    /* Row B: LSGT, AB01-AB11 */
+    {'<', '>'}, {'z', 'Z'}, {'x', 'X'}, {'c', 'C'}, {'v', 'V'}, {'b', 'B'}, {'n', 'N'}, {'m', 'M'}, {',', '<'}, {'.', '>'}, {'/', '?'}, {},
+};
+
+#undef K
+
+/*** Layout table. Add your keyboard mappings to this list */
+static struct {
+    LCID lcid; /* input locale identifier, look for LOCALE_ILANGUAGE
+                 in the appropriate dlls/kernel/nls/.nls file */
+    const char *name;
+    const xkb_keysym_t (*symbols)[MAIN_KEY_LEN][MAIN_KEY_SYMBOLS_LEN];
+    const WORD (*scan)[MAIN_KEY_LEN]; /* scan codes mapping */
+    const WORD (*vkey)[MAIN_KEY_LEN]; /* virtual key codes mapping */
+} main_key_tab[]={
+    {0x0409, "us", &main_key_symbols_us, &main_key_scan_ps2_set1, &main_key_vkey_qwerty},
+};
+
+const WORD xkb_keysym_0xff00_to_vkey[256] DECLSPEC_HIDDEN =
+{
+    /* unused */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF00 */
+    /* special keys */
+    VK_BACK, VK_TAB, 0, VK_CLEAR, 0, VK_RETURN, 0, 0,           /* FF08 */
+    0, 0, 0, VK_PAUSE, VK_SCROLL, VK_SNAPSHOT, 0, 0,            /* FF10 */
+    0, 0, 0, VK_ESCAPE, 0, 0, 0, 0,                             /* FF18 */
+    /* Japanese special keys */
+    0, VK_KANJI, VK_NONCONVERT, VK_CONVERT,                     /* FF20 */
+    VK_DBE_ROMAN, 0, 0, VK_DBE_HIRAGANA,
+    0, 0, VK_DBE_SBCSCHAR, 0, 0, 0, 0, 0,                       /* FF28 */
+    /* Korean special keys (FF31-) */
+    VK_DBE_ALPHANUMERIC, VK_HANGUL, 0, 0, VK_HANJA, 0, 0, 0,    /* FF30 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF38 */
+    /* unused */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF40 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF48 */
+    /* cursor keys */
+    VK_HOME, VK_LEFT, VK_UP, VK_RIGHT,                          /* FF50 */
+    VK_DOWN, VK_PRIOR, VK_NEXT, VK_END,
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF58 */
+    /* misc keys */
+    VK_SELECT, VK_SNAPSHOT, VK_EXECUTE, VK_INSERT, 0,0,0, VK_APPS, /* FF60 */
+    0, VK_CANCEL, VK_HELP, VK_CANCEL, 0, 0, 0, 0,               /* FF68 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF70 */
+    /* keypad keys */
+    0, 0, 0, 0, 0, 0, 0, VK_NUMLOCK,                            /* FF78 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* FF80 */
+    0, 0, 0, 0, 0, VK_RETURN, 0, 0,                             /* FF88 */
+    0, 0, 0, 0, 0, VK_HOME, VK_LEFT, VK_UP,                     /* FF90 */
+    VK_RIGHT, VK_DOWN, VK_PRIOR, VK_NEXT,                       /* FF98 */
+    VK_END, VK_CLEAR, VK_INSERT, VK_DELETE,
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* FFA0 */
+    0, 0, VK_MULTIPLY, VK_ADD,                                  /* FFA8 */
+    /* Windows always generates VK_DECIMAL for Del/. on keypad while some
+     * X11 keyboard layouts generate XK_KP_Separator instead of XK_KP_Decimal
+     * in order to produce a locale dependent numeric separator.
+     */
+    VK_DECIMAL, VK_SUBTRACT, VK_DECIMAL, VK_DIVIDE,
+    VK_NUMPAD0, VK_NUMPAD1, VK_NUMPAD2, VK_NUMPAD3,             /* FFB0 */
+    VK_NUMPAD4, VK_NUMPAD5, VK_NUMPAD6, VK_NUMPAD7,
+    VK_NUMPAD8, VK_NUMPAD9, 0, 0, 0, VK_OEM_NEC_EQUAL,          /* FFB8 */
+    /* function keys */
+    VK_F1, VK_F2,
+    VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10,    /* FFC0 */
+    VK_F11, VK_F12, VK_F13, VK_F14, VK_F15, VK_F16, VK_F17, VK_F18, /* FFC8 */
+    VK_F19, VK_F20, VK_F21, VK_F22, VK_F23, VK_F24, 0, 0,       /* FFD0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* FFD8 */
+    /* modifier keys */
+    0, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL,                       /* FFE0 */
+    VK_RCONTROL, VK_CAPITAL, 0, VK_LMENU,
+    VK_RMENU, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN, 0, 0, 0,    /* FFE8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* FFF0 */
+    0, 0, 0, 0, 0, 0, 0, VK_DELETE                              /* FFF8 */
+};
+
+const WORD xkb_keysym_0xff00_to_scan[256] DECLSPEC_HIDDEN =
+{
+    /* unused */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF00 */
+    /* special keys */
+    0x0E, 0x0F, 0x00, /*?*/ 0, 0x00, 0x1C, 0x00, 0x00,           /* FF08 */
+    0x00, 0x00, 0x00, 0xE11D, 0x46, 0x54, 0x00, 0x00,            /* FF10 */
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,              /* FF18 */
+    /* Japanese special keys */
+    0x00, 0x29, 0x7B, 0x79, 0x70, 0x00, 0x00, 0x70,              /* FF20 */
+    0x00, 0x00, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF28 */
+    /* Korean special keys (FF31-) */
+    0x3A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF30 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF38 */
+    /* unused */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF40 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF48 */
+    /* cursor keys */
+    0xE047, 0xE04B, 0xE048, 0xE04D, 0xE050, 0xE049, 0xE051, 0xE04F, /* FF50 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF58 */
+    /* misc keys */
+    /*?*/ 0, 0xE037, /*?*/ 0, 0xE052, 0x00, 0x00, 0x00, 0xE05D,  /* FF60 */
+    /*?*/ 0, /*?*/ 0, 0x63, 0xE046, 0x00, 0x00, 0x00, 0x00,      /* FF68 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF70 */
+    /* keypad keys */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x45,              /* FF78 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF80 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xE01C, 0x00, 0x00,            /* FF88 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x47, 0x4B, 0x48,              /* FF90 */
+    0x4D, 0x50, 0x49, 0x51, 0x4F, 0x4C, 0x52, 0x53,              /* FF98 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FFA0 */
+    0x00, 0x00, 0x37, 0x4E, 0x53, 0x4A, 0x53, 0xE035,            /* FFA8 */
+    0x52, 0x4F, 0x50, 0x51, 0x4B, 0x4C, 0x4D, 0x47,              /* FFB0 */
+    0x48, 0x49, 0x00, 0x00, 0x00, 0x00,                          /* FFB8 */
+    /* function keys */
+    0x3B, 0x3C,
+    0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44,              /* FFC0 */
+    0x57, 0x58, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69,              /* FFC8 */
+    0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x76, 0x00, 0x00,              /* FFD0 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FFD8 */
+    /* modifier keys */
+    0x00, 0x2A, 0x36, 0x1D, 0xE01D, 0x3A, 0x00, 0x38,            /* FFE0 */
+    0xE038, 0x38, 0xE038, 0xE05B, 0xE05C, 0x00, 0x00, 0x00,      /* FFE8 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FFF0 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE053             /* FFF8 */
+};
+
+const WORD xkb_keysym_xfree86_to_vkey[256] DECLSPEC_HIDDEN =
+{
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF00 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF08 */
+    0, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,            /* 1008FF10 */
+    VK_MEDIA_PLAY_PAUSE, VK_MEDIA_STOP,
+    VK_MEDIA_PREV_TRACK, VK_MEDIA_NEXT_TRACK,
+    0, VK_LAUNCH_MAIL, 0, VK_BROWSER_SEARCH,                    /* 1008FF18 */
+    0, 0, 0, VK_BROWSER_HOME,
+    0, 0, 0, 0, 0, 0, VK_BROWSER_BACK, VK_BROWSER_FORWARD,      /* 1008FF20 */
+    VK_BROWSER_STOP, VK_BROWSER_REFRESH, 0, 0, 0, 0, 0, VK_SLEEP, /* 1008FF28 */
+    VK_BROWSER_FAVORITES, 0, VK_LAUNCH_MEDIA_SELECT, 0,         /* 1008FF30 */
+    0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF38 */
+    VK_LAUNCH_APP1, VK_LAUNCH_APP2, 0, 0, 0, 0, 0, 0,           /* 1008FF40 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF48 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF50 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF58 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF60 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF68 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF70 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF78 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF80 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF88 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF90 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF98 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFA0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFA8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFB0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFB8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFC0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFC8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFD0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFD8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFE0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFE8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFF0 */
+    0, 0, 0, 0, 0, 0, 0, 0                                      /* 1008FFF8 */
+};
+
+const WORD xkb_keysym_xfree86_to_scan[256] DECLSPEC_HIDDEN =
+{
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF00 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF08 */
+    0, 0xE02E, 0xE020, 0xE030, 0xE022, 0xE024, 0xE010, 0xE019,  /* 1008FF10 */
+    0, 0xE06C, 0, 0xE065, 0, 0, 0, 0xE032,                      /* 1008FF18 */
+    0, 0, 0, 0, 0, 0, 0xE06A, 0xE069,                           /* 1008FF20 */
+    0xE068, 0xE067, 0, 0, 0, 0, 0, 0xE05F,                      /* 1008FF28 */
+    0xE066, 0, 0xE06D, 0, 0, 0, 0, 0,                           /* 1008FF30 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF38 */
+    0xE06B, 0xE021, 0, 0, 0, 0, 0, 0,                           /* 1008FF40 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF48 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF50 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF58 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF60 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF68 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF70 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF78 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF80 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF88 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF90 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FF98 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFA0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFA8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFB0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFB8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFC0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFC8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFD0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFD8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFE0 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFE8 */
+    0, 0, 0, 0, 0, 0, 0, 0,                                     /* 1008FFF0 */
+    0, 0, 0, 0, 0, 0, 0, 0                                      /* 1008FFF8 */
 };
 
 #endif /* __WINE_WAYLANDDRV_WAYLAND_KEYBOARD_LAYOUT_H */

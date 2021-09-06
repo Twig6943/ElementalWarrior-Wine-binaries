@@ -43,6 +43,7 @@
 #include "ntuser.h"
 
 #include <linux/input.h>
+#include <stdlib.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -63,6 +64,47 @@ static UINT _xkb_keycode_to_vkey(struct wayland_keyboard *keyboard,
            keyboard->xkb_keycode_to_vkey[xkb_keycode] : 0;
 }
 
+static xkb_keycode_t vkey_to_xkb_keycode(struct wayland_keyboard *keyboard, UINT vkey)
+{
+    xkb_keycode_t i, candidate = 0;
+
+    if (vkey == 0) return 0;
+
+    switch (vkey)
+    {
+    case VK_NUMPAD0: vkey = VK_INSERT; break;
+    case VK_NUMPAD1: vkey = VK_END; break;
+    case VK_NUMPAD2: vkey = VK_DOWN; break;
+    case VK_NUMPAD3: vkey = VK_NEXT; break;
+    case VK_NUMPAD4: vkey = VK_LEFT; break;
+    case VK_NUMPAD5: vkey = VK_CLEAR; break;
+    case VK_NUMPAD6: vkey = VK_RIGHT; break;
+    case VK_NUMPAD7: vkey = VK_HOME; break;
+    case VK_NUMPAD8: vkey = VK_UP; break;
+    case VK_NUMPAD9: vkey = VK_PRIOR; break;
+    case VK_DECIMAL: vkey = VK_DELETE; break;
+
+    case VK_INSERT: case VK_END: case VK_DOWN: case VK_NEXT:
+    case VK_LEFT: case VK_RIGHT: case VK_HOME: case VK_UP:
+    case VK_PRIOR: case VK_DELETE:
+        vkey |= 0xe000;
+        break;
+    default: break;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(keyboard->xkb_keycode_to_vkey); i++)
+    {
+        if (keyboard->xkb_keycode_to_vkey[i] == (vkey & 0xff))
+        {
+            candidate = i;
+            if ((keyboard->xkb_keycode_to_scancode[i] & 0xff00) == (vkey & 0xff00))
+                break;
+        }
+    }
+
+    return candidate;
+}
+
 /* xkb keycodes are offset by 8 from linux input keycodes. */
 static inline xkb_keycode_t linux_input_keycode_to_xkb(uint32_t key)
 {
@@ -81,6 +123,64 @@ static void send_keyboard_input(HWND hwnd, WORD vkey, WORD scan, DWORD flags)
     input.u.ki.dwExtraInfo = 0;
 
     __wine_send_input(hwnd, &input, NULL);
+}
+
+static WCHAR dead_xkb_keysym_to_wchar(xkb_keysym_t xkb_keysym)
+{
+    switch (xkb_keysym)
+    {
+    case XKB_KEY_dead_grave: return 0x0060;
+    case XKB_KEY_dead_acute: return 0x00B4;
+    case XKB_KEY_dead_circumflex: return 0x005E;
+    case XKB_KEY_dead_tilde: return 0x007E;
+    case XKB_KEY_dead_macron: return 0x00AF;
+    case XKB_KEY_dead_breve: return 0x02D8;
+    case XKB_KEY_dead_abovedot: return 0x02D9;
+    case XKB_KEY_dead_diaeresis: return 0x00A8;
+    case XKB_KEY_dead_abovering: return 0x02DA;
+    case XKB_KEY_dead_doubleacute: return 0x02DD;
+    case XKB_KEY_dead_caron: return 0x02C7;
+    case XKB_KEY_dead_cedilla: return 0x00B8;
+    case XKB_KEY_dead_ogonek: return 0x02DB;
+    case XKB_KEY_dead_iota: return 0x037A;
+    case XKB_KEY_dead_voiced_sound: return 0x309B;
+    case XKB_KEY_dead_semivoiced_sound: return 0x309C;
+    case XKB_KEY_dead_belowdot: return 0x002E;
+    case XKB_KEY_dead_stroke: return 0x002D;
+    case XKB_KEY_dead_abovecomma: return 0x1FBF;
+    case XKB_KEY_dead_abovereversedcomma: return 0x1FFE;
+    case XKB_KEY_dead_doublegrave: return 0x02F5;
+    case XKB_KEY_dead_belowring: return 0x02F3;
+    case XKB_KEY_dead_belowmacron: return 0x02CD;
+    case XKB_KEY_dead_belowtilde: return 0x02F7;
+    case XKB_KEY_dead_currency: return 0x00A4;
+    case XKB_KEY_dead_lowline: return 0x005F;
+    case XKB_KEY_dead_aboveverticalline: return 0x02C8;
+    case XKB_KEY_dead_belowverticalline: return 0x02CC;
+    case XKB_KEY_dead_longsolidusoverlay: return 0x002F;
+    case XKB_KEY_dead_a: return 0x0061;
+    case XKB_KEY_dead_A: return 0x0041;
+    case XKB_KEY_dead_e: return 0x0065;
+    case XKB_KEY_dead_E: return 0x0045;
+    case XKB_KEY_dead_i: return 0x0069;
+    case XKB_KEY_dead_I: return 0x0049;
+    case XKB_KEY_dead_o: return 0x006F;
+    case XKB_KEY_dead_O: return 0x004F;
+    case XKB_KEY_dead_u: return 0x0075;
+    case XKB_KEY_dead_U: return 0x0055;
+    case XKB_KEY_dead_small_schwa: return 0x0259;
+    case XKB_KEY_dead_capital_schwa: return 0x018F;
+    /* The following are non-spacing characters, couldn't find good
+     * spacing alternatives. */
+    case XKB_KEY_dead_hook: return 0x0309;
+    case XKB_KEY_dead_horn: return 0x031B;
+    case XKB_KEY_dead_belowcircumflex: return 0x032D;
+    case XKB_KEY_dead_belowbreve: return 0x032E;
+    case XKB_KEY_dead_belowdiaeresis: return 0x0324;
+    case XKB_KEY_dead_invertedbreve: return 0x0311;
+    case XKB_KEY_dead_belowcomma: return 0x0326;
+    default: return 0;
+    }
 }
 
 static BOOL _xkb_keycode_is_keypad_num(xkb_keycode_t xkb_keycode)
@@ -156,6 +256,54 @@ static BOOL wayland_keyboard_emit(struct wayland_keyboard *keyboard, uint32_t ke
     return TRUE;
 }
 
+static struct xkb_state *_xkb_state_new_from_wine(struct wayland_keyboard *keyboard,
+                                                  const BYTE *keystate)
+{
+    struct xkb_state *xkb_state;
+    UINT mods[] = {VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU};
+    UINT toggles[] = {VK_CAPITAL, VK_NUMLOCK, VK_SCROLL};
+    int i;
+
+    /* Create a new xkb_state using the currently active layout. */
+    xkb_state = xkb_state_new(xkb_state_get_keymap(keyboard->xkb_state));
+    if (!xkb_state) return NULL;
+    xkb_state_update_mask(xkb_state, 0, 0, 0,
+                          xkb_state_serialize_layout(keyboard->xkb_state,
+                                                     XKB_STATE_LAYOUT_DEPRESSED),
+                          xkb_state_serialize_layout(keyboard->xkb_state,
+                                                     XKB_STATE_LAYOUT_LATCHED),
+                          xkb_state_serialize_layout(keyboard->xkb_state,
+                                                     XKB_STATE_LAYOUT_LOCKED));
+
+    /* Update the xkb_state from the windows keyboard state by simulating
+     * keypresses. */
+    for (i = 0 ; i < ARRAY_SIZE(mods); i++)
+    {
+        if ((keystate[mods[i]] & 0x80))
+        {
+            xkb_state_update_key(xkb_state,
+                                 vkey_to_xkb_keycode(keyboard, mods[i]),
+                                 XKB_KEY_DOWN);
+        }
+    }
+
+    for (i = 0 ; i < ARRAY_SIZE(toggles); i++)
+    {
+        if ((keystate[toggles[i]] & 0x01))
+        {
+            xkb_state_update_key(xkb_state,
+                                 vkey_to_xkb_keycode(keyboard, toggles[i]),
+                                 XKB_KEY_DOWN);
+            xkb_state_update_key(xkb_state,
+                                 vkey_to_xkb_keycode(keyboard, toggles[i]),
+                                 XKB_KEY_UP);
+
+        }
+    }
+
+    return xkb_state;
+}
+
 /**********************************************************************
  *          Keyboard handling
  */
@@ -193,6 +341,8 @@ static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard,
 
     xkb_state_unref(wayland->keyboard.xkb_state);
     wayland->keyboard.xkb_state = xkb_state;
+    if (wayland->keyboard.xkb_compose_state)
+        xkb_compose_state_reset(wayland->keyboard.xkb_compose_state);
 
     wayland_keyboard_update_layout(&wayland->keyboard);
 
@@ -437,6 +587,17 @@ static const struct wl_keyboard_listener keyboard_listener = {
 void wayland_keyboard_init(struct wayland_keyboard *keyboard, struct wayland *wayland,
                            struct wl_keyboard *wl_keyboard)
 {
+    struct xkb_compose_table *compose_table;
+    const char *locale;
+
+    locale = getenv("LC_ALL");
+    if (!locale || !*locale)
+        locale = getenv("LC_CTYPE");
+    if (!locale || !*locale)
+        locale = getenv("LANG");
+    if (!locale || !*locale)
+        locale = "C";
+
     keyboard->wl_keyboard = wl_keyboard;
     /* Some sensible default values for the repeat rate and delay. */
     keyboard->repeat_interval_ms = 40;
@@ -447,6 +608,20 @@ void wayland_keyboard_init(struct wayland_keyboard *keyboard, struct wayland *wa
         ERR("Failed to create XKB context\n");
         return;
     }
+    compose_table =
+        xkb_compose_table_new_from_locale(keyboard->xkb_context, locale,
+                                          XKB_COMPOSE_COMPILE_NO_FLAGS);
+    if (!compose_table)
+    {
+        ERR("Failed to create XKB compose table\n");
+        return;
+    }
+
+    keyboard->xkb_compose_state =
+        xkb_compose_state_new(compose_table, XKB_COMPOSE_STATE_NO_FLAGS);
+    xkb_compose_table_unref(compose_table);
+    if (!keyboard->xkb_compose_state)
+        ERR("Failed to create XKB compose table\n");
 
     wl_keyboard_add_listener(keyboard->wl_keyboard, &keyboard_listener, wayland);
 }
@@ -459,8 +634,116 @@ void wayland_keyboard_deinit(struct wayland_keyboard *keyboard)
     if (keyboard->wl_keyboard)
         wl_keyboard_destroy(keyboard->wl_keyboard);
 
+    xkb_compose_state_unref(keyboard->xkb_compose_state);
     xkb_state_unref(keyboard->xkb_state);
     xkb_context_unref(keyboard->xkb_context);
 
     memset(keyboard, 0, sizeof(*keyboard));
+}
+
+/***********************************************************************
+ *           WAYLAND_ToUnicodeEx
+ */
+INT WAYLAND_ToUnicodeEx(UINT virt, UINT scan, const BYTE *state,
+                        LPWSTR buf, int nchars, UINT flags, HKL hkl)
+{
+    struct wayland *wayland = thread_init_wayland();
+    char utf8[64];
+    int utf8_len = 0;
+    struct xkb_compose_state *compose_state = wayland->keyboard.xkb_compose_state;
+    enum xkb_compose_status compose_status = XKB_COMPOSE_NOTHING;
+    xkb_keycode_t xkb_keycode;
+    xkb_keysym_t xkb_keysym;
+    struct xkb_state *xkb_state;
+    INT ret;
+
+    if (!wayland->keyboard.xkb_state) return 0;
+
+    if (scan & 0x8000) return 0;  /* key up */
+
+    xkb_keycode = vkey_to_xkb_keycode(&wayland->keyboard, virt);
+    xkb_state = _xkb_state_new_from_wine(&wayland->keyboard, state);
+    if (!xkb_state) return 0;
+
+    /* Try to compose */
+    xkb_keysym = xkb_state_key_get_one_sym(xkb_state, xkb_keycode);
+    if (xkb_keysym != XKB_KEY_NoSymbol && compose_state &&
+        xkb_compose_state_feed(compose_state, xkb_keysym) == XKB_COMPOSE_FEED_ACCEPTED)
+    {
+        compose_status = xkb_compose_state_get_status(compose_state);
+    }
+
+    TRACE_(key)("vkey=0x%x scan=0x%x xkb_keycode=%d xkb_keysym=0x%x compose_status=%d\n",
+                virt, scan, xkb_keycode, xkb_keysym, compose_status);
+
+    if (compose_status == XKB_COMPOSE_NOTHING)
+    {
+        /* Windows converts some Ctrl modified key combinations to strings in a
+         * way different from Linux/xkbcommon (or doesn't convert them at all).
+         * Handle such combinations manually here. */
+        if (xkb_state_mod_name_is_active(xkb_state, XKB_MOD_NAME_CTRL,
+                                         XKB_STATE_MODS_EFFECTIVE))
+        {
+            if (xkb_state_mod_name_is_active(xkb_state, XKB_MOD_NAME_ALT,
+                                             XKB_STATE_MODS_EFFECTIVE))
+            {
+                ret = 0;
+                goto out;
+            }
+            if (((xkb_keysym >= XKB_KEY_exclam) && (xkb_keysym < XKB_KEY_at)) ||
+                (xkb_keysym == XKB_KEY_grave) || (xkb_keysym == XKB_KEY_Tab))
+            {
+                ret = 0;
+                goto out;
+            }
+            if (xkb_keysym == XKB_KEY_Return)
+            {
+                if (xkb_state_mod_name_is_active(xkb_state, XKB_MOD_NAME_SHIFT,
+                                                 XKB_STATE_MODS_EFFECTIVE))
+                {
+                    ret = 0;
+                }
+                else
+                {
+                    buf[0] = '\n';
+                    ret = 1;
+                }
+                goto out;
+            }
+            if (xkb_keysym == XKB_KEY_space)
+            {
+                buf[0] = ' ';
+                ret = 1;
+                goto out;
+            }
+        }
+
+        utf8_len = xkb_state_key_get_utf8(xkb_state, xkb_keycode, utf8, sizeof(utf8));
+    }
+    else if (compose_status == XKB_COMPOSE_COMPOSED)
+    {
+        utf8_len = xkb_compose_state_get_utf8(compose_state, utf8, sizeof(utf8));
+        TRACE_(key)("composed\n");
+    }
+    else if (compose_status == XKB_COMPOSE_COMPOSING && nchars > 0)
+    {
+        if ((buf[0] = dead_xkb_keysym_to_wchar(xkb_keysym)))
+        {
+            TRACE_(key)("returning dead char 0x%04x\n", buf[0]);
+            buf[1] = 0;
+            ret = -1;
+            goto out;
+        }
+    }
+
+    TRACE_(key)("utf8 len=%d '%s'\n", utf8_len, utf8_len ? utf8 : "");
+
+    if (RtlUTF8ToUnicodeN(buf, nchars, (DWORD *)&ret, utf8, utf8_len)) ret = 0;
+    else ret /= sizeof(WCHAR);
+
+out:
+    /* Zero terminate the returned string. */
+    if (ret >= 0 && ret < nchars) buf[ret] = 0;
+    xkb_state_unref(xkb_state);
+    return ret;
 }

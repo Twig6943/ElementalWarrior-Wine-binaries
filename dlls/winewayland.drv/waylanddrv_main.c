@@ -123,6 +123,7 @@ static const struct user_driver_funcs waylanddrv_funcs =
     .pGetDisplayDepth = WAYLAND_GetDisplayDepth,
     .pProcessEvents = WAYLAND_ProcessEvents,
     .pSetCursor = WAYLAND_SetCursor,
+    .pToUnicodeEx = WAYLAND_ToUnicodeEx,
     .pThreadDetach = WAYLAND_ThreadDetach,
     .pUpdateDisplayDevices = WAYLAND_UpdateDisplayDevices,
     .pWindowMessage = WAYLAND_WindowMessage,

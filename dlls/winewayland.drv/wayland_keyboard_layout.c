@@ -56,6 +56,62 @@ static int score_symbols(const xkb_keysym_t sym[MAIN_KEY_SYMBOLS_LEN],
     return score;
 }
 
+static int score_layout(int layout,
+                        const xkb_keysym_t symbols_for_keycode[256][MAIN_KEY_SYMBOLS_LEN])
+{
+    xkb_keycode_t xkb_keycode;
+    int score = 0;
+    int prev_key = 1000;
+    char key_used[MAIN_KEY_LEN] = { 0 };
+
+    for (xkb_keycode = 0; xkb_keycode < 256; xkb_keycode++)
+    {
+        int key, key_score = 0;
+        const xkb_keysym_t *symbols = symbols_for_keycode[xkb_keycode];
+
+        if (*symbols == 0)
+            continue;
+
+        for (key = 0; key < MAIN_KEY_LEN; key++)
+        {
+            if (key_used[key]) continue;
+            key_score = score_symbols(symbols_for_keycode[xkb_keycode],
+                                      (*main_key_tab[layout].symbols)[key]);
+            if (key_score)
+                break;
+        }
+
+        if (TRACE_ON(key))
+        {
+            char utf8[64];
+            _xkb_keysyms_to_utf8(symbols, MAIN_KEY_SYMBOLS_LEN, utf8, sizeof(utf8));
+            TRACE_(key)("xkb_keycode=%d syms={0x%x,0x%x} utf8='%s' key=%d score=%d order=%d\n",
+                        xkb_keycode,
+                        symbols_for_keycode[xkb_keycode][0],
+                        symbols_for_keycode[xkb_keycode][1],
+                        utf8, key, key_score, key_score && (key > prev_key));
+        }
+
+        if (key_score)
+        {
+            /* Multiply score by 100 to allow the key order bonus to break ties,
+             * while not being a primary decision factor. */
+            score += key_score * 100;
+
+            /* xkb keycodes roughly follow a top left to bottom right direction
+             * on the keyboard as they increase, similarly to the keys in
+             * main_key_tab. Give a bonus to layouts that more closely match
+             * the expected ordering. We compare with the last key to get
+             * some reasonable (although local) measure of the order. */
+            score += (key > prev_key);
+            prev_key = key;
+            key_used[key] = 1;
+        }
+    }
+
+    return score;
+}
+
 static void _xkb_keymap_populate_symbols_for_keycode(
     struct xkb_keymap *xkb_keymap,
     xkb_layout_index_t layout,
@@ -84,6 +140,37 @@ static void _xkb_keymap_populate_symbols_for_keycode(
                 symbols_for_keycode[xkb_keycode][level] = syms[0];
         }
     }
+}
+
+static int detect_main_key_layout(struct wayland_keyboard *keyboard,
+                                  const xkb_keysym_t symbols_for_keycode[256][MAIN_KEY_SYMBOLS_LEN])
+{
+    int max_score = 0;
+    int max_i = 0;
+
+    for (int i = 0; i < ARRAY_SIZE(main_key_tab); i++)
+    {
+        int score = score_layout(i, symbols_for_keycode);
+        if (score > max_score)
+        {
+            max_i = i;
+            max_score = score;
+        }
+        TRACE("evaluated layout '%s' score %d\n", main_key_tab[i].name, score);
+    }
+
+    if (max_score == 0)
+    {
+        max_i = 0;
+        while (strcmp(main_key_tab[max_i].name, "us")) max_i++;
+        TRACE("failed to detect layout, falling back to layout 'us'\n");
+    }
+    else
+    {
+        TRACE("detected layout '%s' (score %d)\n", main_key_tab[max_i].name, max_score);
+    }
+
+    return max_i;
 }
 
 /* Populate the xkb_keycode_to_vkey[] and xkb_keycode_to_scan[] arrays based on
@@ -180,6 +267,7 @@ void wayland_keyboard_update_layout(struct wayland_keyboard *keyboard)
     struct xkb_state *xkb_state = keyboard->xkb_state;
     struct xkb_keymap *xkb_keymap;
     xkb_keysym_t symbols_for_keycode[256][MAIN_KEY_SYMBOLS_LEN] = { 0 };
+    int main_key_layout;
 
     if (!xkb_state)
     {
@@ -198,5 +286,7 @@ void wayland_keyboard_update_layout(struct wayland_keyboard *keyboard)
 
     _xkb_keymap_populate_symbols_for_keycode(xkb_keymap, layout, symbols_for_keycode);
 
-    populate_xkb_keycode_maps(keyboard, 0, symbols_for_keycode);
+    main_key_layout = detect_main_key_layout(keyboard, symbols_for_keycode);
+
+    populate_xkb_keycode_maps(keyboard, main_key_layout, symbols_for_keycode);
 }

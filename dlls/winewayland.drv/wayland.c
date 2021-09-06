@@ -184,6 +184,15 @@ static void seat_handle_capabilities(void *data, struct wl_seat *seat,
     {
         wayland_pointer_deinit(&wayland->pointer);
     }
+
+    if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !wayland->keyboard.wl_keyboard)
+    {
+        wayland_keyboard_init(&wayland->keyboard, wayland, wl_seat_get_keyboard(seat));
+    }
+    else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && wayland->keyboard.wl_keyboard)
+    {
+        wayland_keyboard_deinit(&wayland->keyboard);
+    }
 }
 
 static void seat_handle_name(void *data, struct wl_seat *seat, const char *name)
@@ -423,6 +432,9 @@ void wayland_deinit(struct wayland *wayland)
 
     if (wayland->pointer.wl_pointer)
         wayland_pointer_deinit(&wayland->pointer);
+
+    if (wayland->keyboard.wl_keyboard)
+        wayland_keyboard_deinit(&wayland->keyboard);
 
     if (wayland->wl_seat)
         wl_seat_destroy(wayland->wl_seat);

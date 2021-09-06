@@ -498,6 +498,15 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         wayland_pointer_update_cursor_from_win32(&thread_wayland()->pointer,
                                                  (HCURSOR)lp);
         break;
+    case WM_WAYLAND_QUERY_SURFACE_MAPPED:
+        {
+            LRESULT res;
+            struct wayland_surface *wayland_surface = wayland_surface_for_hwnd_lock(hwnd);
+            res = wayland_surface ? wayland_surface->mapped : 0;
+            wayland_surface_for_hwnd_unlock(wayland_surface);
+            return res;
+        }
+        break;
     default:
         FIXME("got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (long)wp, lp);
     }

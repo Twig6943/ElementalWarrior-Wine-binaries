@@ -492,6 +492,7 @@ BOOL WAYLAND_GetCurrentDisplaySettings(LPCWSTR name, BOOL is_primary,
                                        LPDEVMODEW devmode) DECLSPEC_HIDDEN;
 INT WAYLAND_GetDisplayDepth(LPCWSTR name, BOOL is_primary) DECLSPEC_HIDDEN;
 INT WAYLAND_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size) DECLSPEC_HIDDEN;
+UINT WAYLAND_MapVirtualKeyEx(UINT code, UINT maptype, HKL hkl) DECLSPEC_HIDDEN;
 BOOL WAYLAND_ProcessEvents(DWORD mask) DECLSPEC_HIDDEN;
 void WAYLAND_SetCursor(HCURSOR hcursor) DECLSPEC_HIDDEN;
 INT WAYLAND_ToUnicodeEx(UINT virt, UINT scan, const BYTE *state,

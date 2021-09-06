@@ -397,6 +397,31 @@ static WCHAR _xkb_keysyms_to_wchar(const xkb_keysym_t *syms, int nsyms)
     return wbytes >= 2 ? wchars[0] : 0;
 }
 
+static SHORT _xkb_mod_mask_to_win32(struct xkb_keymap *xkb_keymap,
+                                    xkb_mod_mask_t mod_mask)
+{
+    xkb_mod_index_t num_mods, i;
+    SHORT ret = 0;
+
+    num_mods = xkb_keymap_num_mods(xkb_keymap);
+    for (i = 0; i < num_mods; i++)
+    {
+        if (mod_mask & (1 << i))
+        {
+            const char *mod_name = xkb_keymap_mod_get_name(xkb_keymap, i);
+
+            if (!strcmp(mod_name, XKB_MOD_NAME_SHIFT))
+                ret |= 0x0100;
+            else if (!strcmp(mod_name, XKB_MOD_NAME_CTRL))
+                ret |= 0x0200;
+            else if (!strcmp(mod_name, XKB_MOD_NAME_ALT))
+                ret |= 0x0400;
+        }
+    }
+
+    return ret;
+}
+
 static BOOL _xkb_keycode_is_keypad_num(xkb_keycode_t xkb_keycode)
 {
     switch (xkb_keycode - 8)
@@ -1164,4 +1189,72 @@ UINT WAYLAND_MapVirtualKeyEx(UINT code, UINT maptype, HKL hkl)
     }
     TRACE_(key)("returning 0x%04x\n", ret);
     return ret;
+}
+
+/***********************************************************************
+ *           WAYLAND_VkKeyScanEx
+ */
+SHORT WAYLAND_VkKeyScanEx(WCHAR ch, HKL hkl)
+{
+    struct wayland *wayland = thread_init_wayland();
+    xkb_layout_index_t layout;
+    struct xkb_state *xkb_state = wayland->keyboard.xkb_state;
+    struct xkb_keymap *xkb_keymap;
+    xkb_keycode_t xkb_keycode, min_xkb_keycode, max_xkb_keycode;
+
+    TRACE_(key)("ch %04x hkl %p ...\n", ch, hkl);
+
+    if (!xkb_state)
+    {
+        TRACE_(key)("... no xkb state , returning -1\n");
+        return -1;
+    }
+
+    layout = _xkb_state_get_active_layout(xkb_state);
+    if (layout == XKB_LAYOUT_INVALID)
+    {
+        TRACE_(key)("... no active layout, returning -1\n");
+        return -1;
+    }
+
+    xkb_keymap = xkb_state_get_keymap(xkb_state);
+    min_xkb_keycode = xkb_keymap_min_keycode(xkb_keymap);
+    max_xkb_keycode = xkb_keymap_max_keycode(xkb_keymap);
+
+    /* Search through all keycodes and their shift levels for one that
+     * produces a keysym that matches the requested character. */
+    for (xkb_keycode = min_xkb_keycode; xkb_keycode <= max_xkb_keycode; xkb_keycode++)
+    {
+        xkb_level_index_t num_levels =
+            xkb_keymap_num_levels_for_key(xkb_keymap, xkb_keycode, layout);
+        xkb_level_index_t level;
+
+        for (level = 0; level < num_levels; level++)
+        {
+            const xkb_keysym_t *syms;
+            int nsyms = xkb_keymap_key_get_syms_by_level(xkb_keymap, xkb_keycode,
+                                                         layout, level, &syms);
+
+            if (_xkb_keysyms_to_wchar(syms, nsyms) == ch)
+            {
+                UINT vkey;
+                xkb_mod_mask_t mod_mask;
+                SHORT ret;
+
+                vkey = _xkb_keycode_to_vkey(&wayland->keyboard, xkb_keycode);
+                if (vkey == 0)
+                    continue;
+
+                xkb_keymap_key_get_mods_for_level(xkb_keymap, xkb_keycode,
+                                                  layout, level, &mod_mask, 1);
+                ret = _xkb_mod_mask_to_win32(xkb_keymap, mod_mask) | vkey;
+
+                TRACE_(key)("... returning %04x\n", ret);
+                return ret;
+            }
+        }
+    }
+
+    TRACE_(key)("... matching vkey not found, returning -1\n");
+    return -1;
 }

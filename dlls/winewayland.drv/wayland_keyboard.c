@@ -50,11 +50,122 @@
 WINE_DEFAULT_DEBUG_CHANNEL(keyboard);
 WINE_DECLARE_DEBUG_CHANNEL(key);
 
+/* xkb_keysym_t fixed maps from wayland_keyboard_layout.h. */
+extern const WORD xkb_keysym_0xff00_to_vkey[256];
+extern const WORD xkb_keysym_0xff00_to_scan[256];
+extern const WORD xkb_keysym_xfree86_to_vkey[256];
+extern const WORD xkb_keysym_xfree86_to_scan[256];
+
+static const struct
+{
+    DWORD       vkey;
+    const char *name;
+} vkey_names[] = {
+    { VK_ADD,                   "Num +" },
+    { VK_BACK,                  "Backspace" },
+    { VK_CAPITAL,               "Caps Lock" },
+    { VK_CONTROL,               "Ctrl" },
+    { VK_DECIMAL,               "Num Del" },
+    { VK_DELETE,                "Delete" },
+    { VK_DIVIDE,                "Num /" },
+    { VK_DOWN,                  "Down" },
+    { VK_END,                   "End" },
+    { VK_ESCAPE,                "Esc" },
+    { VK_F1,                    "F1" },
+    { VK_F2,                    "F2" },
+    { VK_F3,                    "F3" },
+    { VK_F4,                    "F4" },
+    { VK_F5,                    "F5" },
+    { VK_F6,                    "F6" },
+    { VK_F7,                    "F7" },
+    { VK_F8,                    "F8" },
+    { VK_F9,                    "F9" },
+    { VK_F10,                   "F10" },
+    { VK_F11,                   "F11" },
+    { VK_F12,                   "F12" },
+    { VK_F13,                   "F13" },
+    { VK_F14,                   "F14" },
+    { VK_F15,                   "F15" },
+    { VK_F16,                   "F16" },
+    { VK_F17,                   "F17" },
+    { VK_F18,                   "F18" },
+    { VK_F19,                   "F19" },
+    { VK_F20,                   "F20" },
+    { VK_F21,                   "F21" },
+    { VK_F22,                   "F22" },
+    { VK_F23,                   "F23" },
+    { VK_F24,                   "F24" },
+    { VK_HELP,                  "Help" },
+    { VK_HOME,                  "Home" },
+    { VK_INSERT,                "Insert" },
+    { VK_LCONTROL,              "Ctrl" },
+    { VK_LEFT,                  "Left" },
+    { VK_LMENU,                 "Alt" },
+    { VK_LSHIFT,                "Shift" },
+    { VK_LWIN,                  "Win" },
+    { VK_MENU,                  "Alt" },
+    { VK_MULTIPLY,              "Num *" },
+    { VK_NEXT,                  "Page Down" },
+    { VK_NUMLOCK,               "Num Lock" },
+    { VK_NUMPAD0,               "Num 0" },
+    { VK_NUMPAD1,               "Num 1" },
+    { VK_NUMPAD2,               "Num 2" },
+    { VK_NUMPAD3,               "Num 3" },
+    { VK_NUMPAD4,               "Num 4" },
+    { VK_NUMPAD5,               "Num 5" },
+    { VK_NUMPAD6,               "Num 6" },
+    { VK_NUMPAD7,               "Num 7" },
+    { VK_NUMPAD8,               "Num 8" },
+    { VK_NUMPAD9,               "Num 9" },
+    { VK_OEM_CLEAR,             "Num Clear" },
+    { VK_OEM_NEC_EQUAL,         "Num =" },
+    { VK_PRIOR,                 "Page Up" },
+    { VK_RCONTROL,              "Right Ctrl" },
+    { VK_RETURN,                "Return" },
+    { VK_RETURN,                "Num Enter" },
+    { VK_RIGHT,                 "Right" },
+    { VK_RMENU,                 "Right Alt" },
+    { VK_RSHIFT,                "Right Shift" },
+    { VK_RWIN,                  "Right Win" },
+    { VK_SEPARATOR,             "Num ," },
+    { VK_SHIFT,                 "Shift" },
+    { VK_SPACE,                 "Space" },
+    { VK_SUBTRACT,              "Num -" },
+    { VK_TAB,                   "Tab" },
+    { VK_UP,                    "Up" },
+    { VK_VOLUME_DOWN,           "Volume Down" },
+    { VK_VOLUME_MUTE,           "Mute" },
+    { VK_VOLUME_UP,             "Volume Up" },
+    { VK_OEM_MINUS,             "-" },
+    { VK_OEM_PLUS,              "=" },
+    { VK_OEM_1,                 ";" },
+    { VK_OEM_2,                 "/" },
+    { VK_OEM_3,                 "`" },
+    { VK_OEM_4,                 "[" },
+    { VK_OEM_5,                 "\\" },
+    { VK_OEM_6,                 "]" },
+    { VK_OEM_7,                 "'" },
+    { VK_OEM_COMMA,             "," },
+    { VK_OEM_PERIOD,            "." },
+};
+
 static DWORD _xkb_keycode_to_scancode(struct wayland_keyboard *keyboard,
                                       xkb_keycode_t xkb_keycode)
 {
     return xkb_keycode < ARRAY_SIZE(keyboard->xkb_keycode_to_scancode) ?
            keyboard->xkb_keycode_to_scancode[xkb_keycode] : 0;
+}
+
+static xkb_keycode_t scancode_to_xkb_keycode(struct wayland_keyboard *keyboard, WORD scan)
+{
+    UINT j;
+
+    if (scan == 0) return 0;
+
+    for (j = 0; j < ARRAY_SIZE(keyboard->xkb_keycode_to_scancode); j++)
+        if (keyboard->xkb_keycode_to_scancode[j] == scan) return j;
+
+    return 0;
 }
 
 static UINT _xkb_keycode_to_vkey(struct wayland_keyboard *keyboard,
@@ -103,6 +214,51 @@ static xkb_keycode_t vkey_to_xkb_keycode(struct wayland_keyboard *keyboard, UINT
     }
 
     return candidate;
+}
+
+static WORD scancode_to_vkey_fixed(UINT scan)
+{
+    int i;
+
+    if (scan == 0) return 0;
+
+    for (i = 0; i <= 0xff; i++)
+    {
+        if (xkb_keysym_0xff00_to_scan[i] == scan &&
+            xkb_keysym_0xff00_to_vkey[i] != 0)
+        {
+            return xkb_keysym_0xff00_to_vkey[i];
+        }
+    }
+
+    for (i = 0; i <= 0xff; i++)
+    {
+        if (xkb_keysym_xfree86_to_scan[i] == scan &&
+            xkb_keysym_xfree86_to_vkey[i] != 0)
+        {
+            return xkb_keysym_xfree86_to_vkey[i];
+        }
+    }
+
+    return 0;
+}
+
+static UINT scancode_to_vkey(struct wayland_keyboard *keyboard, DWORD scan)
+{
+    UINT vkey = _xkb_keycode_to_vkey(keyboard, scancode_to_xkb_keycode(keyboard, scan));
+    if (!vkey) vkey = scancode_to_vkey_fixed(scan);
+    return vkey;
+}
+
+static const char* vkey_to_name(UINT vkey)
+{
+    UINT j;
+
+    for (j = 0; j < ARRAY_SIZE(vkey_names); j++)
+        if (vkey_names[j].vkey == vkey)
+            return vkey_names[j].name;
+
+    return NULL;
 }
 
 /* xkb keycodes are offset by 8 from linux input keycodes. */
@@ -770,4 +926,64 @@ out:
     if (ret >= 0 && ret < nchars) buf[ret] = 0;
     xkb_state_unref(xkb_state);
     return ret;
+}
+
+/***********************************************************************
+ *           GetKeyNameText
+ */
+INT WAYLAND_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size)
+{
+    struct wayland *wayland = thread_init_wayland();
+    int scan, vkey, len;
+    const char *name;
+    char key[2];
+
+    scan = (lparam >> 16) & 0x1FF;
+    vkey = scancode_to_vkey(&wayland->keyboard, scan);
+
+    if (lparam & (1 << 25))
+    {
+        /* Caller doesn't care about distinctions between left and
+           right keys. */
+        switch (vkey)
+        {
+        case VK_LSHIFT:
+        case VK_RSHIFT:
+            vkey = VK_SHIFT; break;
+        case VK_LCONTROL:
+        case VK_RCONTROL:
+            vkey = VK_CONTROL; break;
+        case VK_LMENU:
+        case VK_RMENU:
+            vkey = VK_MENU; break;
+        }
+    }
+
+    if ((vkey >= 0x30 && vkey <= 0x39) || (vkey >= 0x41 && vkey <= 0x5a))
+    {
+        key[0] = vkey;
+        if (vkey >= 0x41)
+            key[0] += 0x20;
+        key[1] = 0;
+        name = key;
+    }
+    else
+    {
+        name = vkey_to_name(vkey);
+    }
+
+    if (!name || RtlUTF8ToUnicodeN(buffer, size, (DWORD *)&len, name, strlen(name) + 1)) len = 0;
+    else len = len / sizeof(WCHAR) - 1;
+
+    if (!len)
+    {
+        char buf[16];
+        len = snprintf(buf, sizeof(buf), "Key 0x%02x", vkey);
+        if (len > sizeof(buf)) len = sizeof(buf);
+        len = ascii_to_unicode_z(buffer, size, buf, len);
+        if (len > 0) len--;
+    }
+
+    TRACE_(key)("lparam 0x%08x -> %s\n", (int)lparam, debugstr_w(buffer));
+    return len;
 }

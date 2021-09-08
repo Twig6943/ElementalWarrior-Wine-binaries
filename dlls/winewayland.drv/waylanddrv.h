@@ -151,6 +151,7 @@ struct wayland
     struct wayland_pointer pointer;
     DWORD last_dispatch_mask;
     BOOL processing_events;
+    int last_event_type;
     int event_notification_pipe[2];
 };
 
@@ -479,6 +480,13 @@ static inline BOOL intersect_rect(RECT *dst, const RECT *src1, const RECT *src2)
     dst->right = min(src1->right, src2->right);
     dst->bottom = min(src1->bottom, src2->bottom);
     return !IsRectEmpty(dst);
+}
+
+static inline HWND get_focus(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo(GetCurrentThreadId(), &info) ? info.hwndFocus : 0;
 }
 
 /**********************************************************************

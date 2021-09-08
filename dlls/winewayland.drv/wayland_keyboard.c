@@ -886,6 +886,7 @@ static void repeat_key(void *data)
     if (wayland->keyboard.repeat_interval_ms > 0)
     {
         wayland->last_dispatch_mask |= QS_KEY | QS_HOTKEY;
+        wayland->last_event_type = INPUT_KEYBOARD;
 
         wayland_keyboard_emit(&wayland->keyboard, wayland->keyboard.last_pressed_key,
                               WL_KEYBOARD_KEY_STATE_PRESSED, hwnd);
@@ -924,6 +925,7 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
     TRACE("key=%d state=%#x focused_hwnd=%p\n", key, state, focused_hwnd);
 
     wayland->last_dispatch_mask |= QS_KEY | QS_HOTKEY;
+    wayland->last_event_type = INPUT_KEYBOARD;
 
     if (!wayland_keyboard_emit(&wayland->keyboard, key, state, focused_hwnd))
         return;

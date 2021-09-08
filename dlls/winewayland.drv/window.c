@@ -1013,6 +1013,23 @@ UINT WAYLAND_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp)
     return swp;
 }
 
+/***********************************************************************
+ *           WAYLAND_SetWindowRgn
+ */
+void WAYLAND_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw)
+{
+    struct wayland_win_data *data;
+
+    TRACE("hwnd=%p\n", hwnd);
+
+    if ((data = wayland_win_data_get(hwnd)))
+    {
+        if (data->window_surface)
+            wayland_window_surface_set_window_region(data->window_surface, hrgn);
+        wayland_win_data_release(data);
+    }
+}
+
 static void handle_wm_wayland_monitor_change(struct wayland *wayland)
 {
     wayland_update_outputs_from_process(wayland);

@@ -987,6 +987,32 @@ void WAYLAND_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
     wayland_win_data_release(data);
 }
 
+/***********************************************************************
+ *           WAYLAND_ShowWindow
+ */
+UINT WAYLAND_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp)
+{
+    struct wayland_surface *wsurface;
+
+    TRACE("hwnd=%p cmd=%d\n", hwnd, cmd);
+
+    if (IsRectEmpty(rect)) return swp;
+    if (!(NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_MINIMIZE)) return swp;
+    /* always hide icons off-screen */
+    if (rect->left != -32000 || rect->top != -32000)
+    {
+        OffsetRect(rect, -32000 - rect->left, -32000 - rect->top);
+        swp &= ~(SWP_NOMOVE | SWP_NOCLIENTMOVE);
+    }
+
+    if ((wsurface = wayland_surface_for_hwnd_lock(hwnd)) && wsurface->xdg_toplevel)
+        xdg_toplevel_set_minimized(wsurface->xdg_toplevel);
+
+    wayland_surface_for_hwnd_unlock(wsurface);
+
+    return swp;
+}
+
 static void handle_wm_wayland_monitor_change(struct wayland *wayland)
 {
     wayland_update_outputs_from_process(wayland);
@@ -1040,7 +1066,8 @@ static void handle_wm_wayland_configure(HWND hwnd)
     if (width == 0)
     {
         int ignore;
-        width = data->restore_rect.right - data->restore_rect.left;
+        if (!(style & WS_MINIMIZE))
+            width = data->restore_rect.right - data->restore_rect.left;
         if (width == 0)
             width = data->window_rect.right - data->window_rect.left;
         wayland_surface_coords_rounded_from_wine(wsurface, width, 0,
@@ -1050,7 +1077,8 @@ static void handle_wm_wayland_configure(HWND hwnd)
     if (height == 0)
     {
         int ignore;
-        height = data->restore_rect.bottom - data->restore_rect.top;
+        if (!(style & WS_MINIMIZE))
+            height = data->restore_rect.bottom - data->restore_rect.top;
         if (height == 0)
             height = data->window_rect.bottom - data->window_rect.top;
         wayland_surface_coords_rounded_from_wine(wsurface, 0, height,

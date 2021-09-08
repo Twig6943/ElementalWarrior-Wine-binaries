@@ -125,6 +125,7 @@ static const struct user_driver_funcs waylanddrv_funcs =
     .pMapVirtualKeyEx = WAYLAND_MapVirtualKeyEx,
     .pProcessEvents = WAYLAND_ProcessEvents,
     .pSetCursor = WAYLAND_SetCursor,
+    .pShowWindow = WAYLAND_ShowWindow,
     .pToUnicodeEx = WAYLAND_ToUnicodeEx,
     .pVkKeyScanEx = WAYLAND_VkKeyScanEx,
     .pThreadDetach = WAYLAND_ThreadDetach,

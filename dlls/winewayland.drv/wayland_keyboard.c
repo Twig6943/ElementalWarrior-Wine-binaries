@@ -832,6 +832,21 @@ static void keyboard_handle_enter(void *data, struct wl_keyboard *keyboard,
         {
             struct wayland_surface *toplevel = wayland_surface;
             while (toplevel->parent) toplevel = toplevel->parent;
+
+            if (NtUserGetWindowLongW(toplevel->hwnd, GWL_STYLE) & WS_MINIMIZE)
+            {
+                /* If a minimized window is already activated from Wine's
+                 * perspective, reactivating it is a null operation, and thus
+                 * won't trigger any activation side-effects (e.g., many games
+                 * change the display mode when they are activated). In order
+                 * to get those effects properly applied, deactivate the window
+                 * now, so it can be properly reactivated after restoration. */
+                if (foreground == toplevel->hwnd)
+                    NtUserSetForegroundWindow(NtUserGetDesktopWindow());
+                NtUserShowWindow(toplevel->hwnd, SW_RESTORE);
+                NtUserShowOwnedPopups(toplevel->hwnd, TRUE);
+            }
+
             NtUserSetForegroundWindow(toplevel->hwnd);
         }
 

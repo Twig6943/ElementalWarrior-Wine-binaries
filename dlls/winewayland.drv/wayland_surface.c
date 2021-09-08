@@ -37,12 +37,27 @@ static void handle_xdg_surface_configure(void *data, struct xdg_surface *xdg_sur
                                          uint32_t serial)
 {
     struct wayland_surface *surface = data;
+    uint32_t last_serial = surface->pending.serial;
+    BOOL last_processed = surface->pending.processed;
 
     TRACE("hwnd=%p serial=%u\n", surface->hwnd, serial);
 
     surface->pending.serial = serial;
+    surface->pending.processed = FALSE;
 
-    wayland_surface_ack_pending_configure(surface);
+    /* If we have an unprocessed WM_WAYLAND_CONFIGURE message, no need to
+     * repost. Note that checking only for a valid serial is not enough to
+     * guarantee that there is a pending WM_WAYLAND_CONFIGURE message: we may
+     * have processed the message but not acked the configure request due to
+     * surface size incompatibilities (see window.c:
+     * wayland_win_data_update_wayland_surface_state()). */
+    if (last_serial && !last_processed)
+    {
+        TRACE("not reposting, last_serial=%u\n", last_serial);
+        return;
+    }
+
+    NtUserPostMessage(surface->hwnd, WM_WAYLAND_CONFIGURE, 0, 0);
 }
 
 /**********************************************************************
@@ -192,7 +207,7 @@ void wayland_surface_make_toplevel(struct wayland_surface *surface,
     surface->role = WAYLAND_SURFACE_ROLE_TOPLEVEL;
 
     /* Wait for the first configure event. */
-    while (!surface->current.serial)
+    while (!surface->pending.serial)
         wl_display_roundtrip_queue(wayland->wl_display, wayland->wl_event_queue);
 
     return;

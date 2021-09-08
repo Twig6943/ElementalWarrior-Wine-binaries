@@ -59,6 +59,7 @@ enum wayland_window_message
     WM_WAYLAND_MONITOR_CHANGE = 0x80001000,
     WM_WAYLAND_SET_CURSOR,
     WM_WAYLAND_QUERY_SURFACE_MAPPED,
+    WM_WAYLAND_CONFIGURE,
 };
 
 enum wayland_surface_role
@@ -189,6 +190,7 @@ struct wayland_surface_configure
     int height;
     enum wayland_configure_flags configure_flags;
     uint32_t serial;
+    BOOL processed;
 };
 
 struct wayland_surface

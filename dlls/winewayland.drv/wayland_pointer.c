@@ -159,6 +159,11 @@ static void pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
     wayland->last_dispatch_mask |= QS_MOUSEBUTTON;
     wayland->last_event_type = INPUT_MOUSE;
 
+    if (state == WL_POINTER_BUTTON_STATE_PRESSED)
+        wayland->last_button_serial = serial;
+    else
+        wayland->last_button_serial = 0;
+
     __wine_send_input(focused_hwnd, &input, NULL);
 }
 

@@ -1018,6 +1018,52 @@ static void handle_wm_wayland_monitor_change(struct wayland *wayland)
     wayland_update_outputs_from_process(wayland);
 }
 
+static enum xdg_toplevel_resize_edge hittest_to_resize_edge(WPARAM hittest)
+{
+    switch (hittest) {
+    case WMSZ_LEFT:        return XDG_TOPLEVEL_RESIZE_EDGE_LEFT;
+    case WMSZ_RIGHT:       return XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
+    case WMSZ_TOP:         return XDG_TOPLEVEL_RESIZE_EDGE_TOP;
+    case WMSZ_TOPLEFT:     return XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT;
+    case WMSZ_TOPRIGHT:    return XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT;
+    case WMSZ_BOTTOM:      return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM;
+    case WMSZ_BOTTOMLEFT:  return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT;
+    case WMSZ_BOTTOMRIGHT: return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT;
+    default:               return XDG_TOPLEVEL_RESIZE_EDGE_NONE;
+    }
+}
+
+/***********************************************************************
+ *          WAYLAND_SysCommand
+ */
+LRESULT WAYLAND_SysCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
+{
+    LRESULT ret = -1;
+    WPARAM command = wparam & 0xfff0;
+    WPARAM hittest = wparam & 0x0f;
+    struct wayland_surface *wsurface;
+
+    TRACE("cmd=%lx hwnd=%p, %lx, %lx\n", (long)command, hwnd, (long)wparam, lparam);
+
+    if (!(wsurface = wayland_surface_for_hwnd_lock(hwnd)) || !wsurface->xdg_toplevel)
+        goto done;
+
+    if (command == SC_SIZE)
+    {
+        if (wsurface->wayland->last_button_serial)
+        {
+            xdg_toplevel_resize(wsurface->xdg_toplevel, wsurface->wayland->wl_seat,
+                                wsurface->wayland->last_button_serial,
+                                hittest_to_resize_edge(hittest));
+        }
+        ret = 0;
+    }
+
+done:
+    wayland_surface_for_hwnd_unlock(wsurface);
+    return ret;
+}
+
 static void handle_wm_wayland_configure(HWND hwnd)
 {
     struct wayland_win_data *data;

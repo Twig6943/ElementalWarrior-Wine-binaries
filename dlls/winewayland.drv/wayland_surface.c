@@ -273,6 +273,98 @@ void wayland_surface_clear_role(struct wayland_surface *surface)
 }
 
 /**********************************************************************
+ *          wayland_surface_reconfigure_position
+ *
+ * Configures the position of a wayland surface relative to its parent.
+ * This only applies to surfaces having the subsurface role.
+ *
+ * The coordinates should be given in wine's coordinate space.
+ *
+ * This function sets up but doesn't actually apply any new configuration.
+ * The wayland_surface_reconfigure_apply() needs to be called for changes
+ * to take effect.
+ */
+void wayland_surface_reconfigure_position(struct wayland_surface *surface,
+                                          int wine_x, int wine_y)
+{
+    int x, y;
+
+    wayland_surface_coords_rounded_from_wine(surface, wine_x, wine_y, &x, &y);
+
+    TRACE("surface=%p hwnd=%p wine=%d,%d wayland=%d,%d\n",
+          surface, surface->hwnd, wine_x, wine_y, x, y);
+
+    if (surface->wl_subsurface)
+        wl_subsurface_set_position(surface->wl_subsurface, x, y);
+}
+
+/**********************************************************************
+ *          wayland_surface_reconfigure_geometry
+ *
+ * Configures the geometry of a wayland surface, i.e., the rectangle
+ * within that surface that contains the surface's visible bounds.
+ *
+ * The coordinates and sizes should be given in wine's coordinate space.
+ *
+ * This function sets up but doesn't actually apply any new configuration.
+ * The wayland_surface_reconfigure_apply() needs to be called for changes
+ * to take effect.
+ */
+void wayland_surface_reconfigure_geometry(struct wayland_surface *surface,
+                                          int wine_x, int wine_y,
+                                          int wine_width, int wine_height)
+{
+    int x, y, width, height;
+
+    wayland_surface_coords_rounded_from_wine(surface, wine_x, wine_y, &x, &y);
+    wayland_surface_coords_rounded_from_wine(surface, wine_width, wine_height,
+                                             &width, &height);
+
+    TRACE("surface=%p hwnd=%p wine=%d,%d+%dx%d wayland=%d,%d+%dx%d\n",
+          surface, surface->hwnd,
+          wine_x, wine_y, wine_width, wine_height,
+          x, y, width, height);
+
+    if (surface->xdg_surface && width != 0 && height != 0)
+    {
+        enum wayland_configure_flags flags = surface->current.configure_flags;
+
+        /* Sometimes rounding errors in our coordinate space transformations
+         * can lead to invalid geometry values, so enforce acceptable geometry
+         * values to avoid causing a protocol error. */
+        if (flags & WAYLAND_CONFIGURE_FLAG_MAXIMIZED)
+        {
+            width = surface->current.width;
+            height = surface->current.height;
+        }
+        else if (flags & WAYLAND_CONFIGURE_FLAG_FULLSCREEN)
+        {
+            if (width > surface->current.width)
+                width = surface->current.width;
+            if (height > surface->current.height)
+                height = surface->current.height;
+        }
+
+        xdg_surface_set_window_geometry(surface->xdg_surface, x, y, width, height);
+    }
+}
+
+/**********************************************************************
+ *          wayland_surface_reconfigure_apply
+ *
+ * Applies the configuration set by previous calls to the
+ * wayland_surface_reconfigure{_glvk}() functions.
+ */
+void wayland_surface_reconfigure_apply(struct wayland_surface *surface)
+{
+    wl_surface_commit(surface->wl_surface);
+
+    /* Commit the parent so any subsurface repositioning takes effect. */
+    if (surface->parent)
+        wl_surface_commit(surface->parent->wl_surface);
+}
+
+/**********************************************************************
  *          wayland_surface_configure_is_compatible
  *
  * Checks whether a wayland_surface_configure object is compatible with the

@@ -141,6 +141,7 @@ struct wayland_surface *wayland_surface_create_plain(struct wayland *wayland)
         goto err;
 
     wl_surface_set_user_data(surface->wl_surface, surface);
+    surface->drawing_allowed = TRUE;
 
     surface->ref = 1;
     surface->role = WAYLAND_SURFACE_ROLE_NONE;
@@ -428,10 +429,11 @@ BOOL wayland_surface_commit_buffer(struct wayland_surface *surface,
      * they accept. To avoid wayland protocol errors, drop buffers not matching
      * the expected dimensions of such surfaces. This typically happens
      * transiently during resizing operations. */
-    if (!wayland_surface_configure_is_compatible(&surface->current,
-                                                 wayland_width,
-                                                 wayland_height,
-                                                 surface->current.configure_flags))
+    if (!surface->drawing_allowed ||
+        !wayland_surface_configure_is_compatible(&surface->current,
+                                             wayland_width,
+                                             wayland_height,
+                                             surface->current.configure_flags))
     {
         wayland_mutex_unlock(&surface->mutex);
         TRACE("surface=%p buffer=%p dropping buffer\n", surface, shm_buffer);

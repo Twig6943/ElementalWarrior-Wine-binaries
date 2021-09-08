@@ -647,6 +647,7 @@ static BOOL wayland_win_data_update_wayland_xdg_state(struct wayland_win_data *d
     {
         TRACE("hwnd=%p window state not compatible with current or "
               "pending wayland surface configuration\n", data->hwnd);
+        wsurface->drawing_allowed = FALSE;
         return FALSE;
     }
 
@@ -779,6 +780,8 @@ static void wayland_win_data_update_wayland_surface_state(struct wayland_win_dat
                                              compat.right - compat.left,
                                              compat.bottom - compat.top);
     }
+
+    wsurface->drawing_allowed = TRUE;
 
     /* Some compositors require the surface to be mapped when we have an
      * ack-ed configuration. */

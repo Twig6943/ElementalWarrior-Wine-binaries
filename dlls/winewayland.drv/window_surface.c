@@ -301,6 +301,22 @@ void wayland_window_surface_flush(struct window_surface *window_surface)
         wws->last_flush_failed = TRUE;
         goto done;
     }
+
+    if (needs_flush)
+    {
+        BOOL drawing_allowed;
+        wayland_mutex_lock(&wws->wayland_surface->mutex);
+        drawing_allowed = wws->wayland_surface->drawing_allowed;
+        wayland_mutex_unlock(&wws->wayland_surface->mutex);
+        if (!drawing_allowed)
+        {
+            TRACE("drawing disallowed on wayland surface=%p, returning\n",
+                  wws->wayland_surface);
+            wws->last_flush_failed = TRUE;
+            goto done;
+        }
+    }
+
     wws->last_flush_failed = FALSE;
 
     if (!needs_flush) goto done;

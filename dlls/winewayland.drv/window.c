@@ -1058,6 +1058,15 @@ LRESULT WAYLAND_SysCommand(HWND hwnd, WPARAM wparam, LPARAM lparam)
         }
         ret = 0;
     }
+    else if (command == SC_MOVE)
+    {
+        if (wsurface->wayland->last_button_serial)
+        {
+            xdg_toplevel_move(wsurface->xdg_toplevel, wsurface->wayland->wl_seat,
+                              wsurface->wayland->last_button_serial);
+        }
+        ret = 0;
+    }
 
 done:
     wayland_surface_for_hwnd_unlock(wsurface);

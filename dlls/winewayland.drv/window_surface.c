@@ -49,6 +49,8 @@ struct wayland_window_surface
     RECT                  bounds;
     HRGN                  region; /* region set through window_surface funcs */
     HRGN                  total_region; /* Total region (surface->region AND window_region) */
+    COLORREF              color_key;
+    BYTE                  alpha;
     void                 *bits;
     struct wayland_mutex  mutex;
     BOOL                  last_flush_failed;
@@ -188,7 +190,8 @@ static int get_preferred_format(struct wayland_window_surface *wws)
 
     /* Use ARGB to implement window regions (areas out of the region are
      * transparent). */
-    if ((window_region && NtUserGetWindowRgnEx(wws->hwnd, window_region, 0) != ERROR))
+    if ((window_region && NtUserGetWindowRgnEx(wws->hwnd, window_region, 0) != ERROR) ||
+        wws->color_key != CLR_INVALID || wws->alpha != 255)
         format = WL_SHM_FORMAT_ARGB8888;
     else
         format = WL_SHM_FORMAT_XRGB8888;
@@ -356,8 +359,7 @@ static void wayland_window_surface_copy_to_buffer(struct wayland_window_surface 
     rgn_rect_end = rgn_rect + rgndata->rdh.nCount;
 
     /* If we have an ARGB buffer we need to explicitly apply the surface
-     * alpha (assumed to be 255 currently) to ensure the destination has
-     * sensible alpha values. */
+     * alpha to ensure the destination has sensible alpha values. */
     apply_surface_alpha = buffer->format == WL_SHM_FORMAT_ARGB8888;
 
     for (;rgn_rect < rgn_rect_end; rgn_rect++)
@@ -380,7 +382,8 @@ static void wayland_window_surface_copy_to_buffer(struct wayland_window_surface 
         height = min(rgn_rect->bottom, buffer->height) - rgn_rect->top;
 
         /* Fast path for full width rectangles. */
-        if (width == buffer->width && !apply_surface_alpha)
+        if (width == buffer->width && !apply_surface_alpha &&
+            wws->color_key == CLR_INVALID)
         {
             memcpy(dst, src, height * buffer->stride);
             continue;
@@ -392,11 +395,24 @@ static void wayland_window_surface_copy_to_buffer(struct wayland_window_surface 
             {
                 memcpy(dst, src, width * 4);
             }
-            else
+            else if (wws->alpha == 255)
             {
                 for (x = 0; x < width; x++)
                     dst[x] = 0xff000000 | src[x];
             }
+            else
+            {
+                for (x = 0; x < width; x++)
+                {
+                    dst[x] = ((wws->alpha << 24) |
+                              (((BYTE)(src[x] >> 16) * wws->alpha / 255) << 16) |
+                              (((BYTE)(src[x] >> 8) * wws->alpha / 255) << 8) |
+                              (((BYTE)src[x] * wws->alpha / 255)));
+                }
+            }
+
+            if (wws->color_key != CLR_INVALID)
+                for (x = 0; x < width; x++) if ((src[x] & 0xffffff) == wws->color_key) dst[x] = 0;
 
             src += wws->info.bmiHeader.biWidth;
             dst = (unsigned int*)((unsigned char*)dst + buffer->stride);
@@ -469,9 +485,12 @@ void wayland_window_surface_flush(struct window_surface *window_surface)
 
     if (!needs_flush) goto done;
 
-    TRACE("flushing surface %p hwnd %p surface_rect %s bits %p region %p\n",
+    TRACE("flushing surface %p hwnd %p surface_rect %s bits %p color_key %08x "
+          "alpha %02x compression %u region %p\n",
           wws, wws->hwnd, wine_dbgstr_rect(&wws->header.rect),
-          wws->bits, wws->total_region);
+          wws->bits, (UINT)wws->color_key, wws->alpha,
+          (UINT)wws->info.bmiHeader.biCompression,
+          wws->total_region);
 
     assert(wws->wayland_buffer_queue);
 
@@ -568,7 +587,8 @@ static const struct window_surface_funcs wayland_window_surface_funcs =
 /***********************************************************************
  *           wayland_window_surface_create
  */
-struct window_surface *wayland_window_surface_create(HWND hwnd, const RECT *rect)
+struct window_surface *wayland_window_surface_create(HWND hwnd, const RECT *rect,
+                                                     COLORREF color_key, BYTE alpha)
 {
     struct wayland_window_surface *wws;
     int width = rect->right - rect->left, height = rect->bottom - rect->top;
@@ -592,6 +612,8 @@ struct window_surface *wayland_window_surface_create(HWND hwnd, const RECT *rect
     wws->header.rect  = *rect;
     wws->header.ref   = 1;
     wws->hwnd         = hwnd;
+    wws->color_key    = color_key;
+    wws->alpha        = alpha;
     wayland_window_surface_set_window_region(&wws->header, (HRGN)1);
     reset_bounds(&wws->bounds);
 
@@ -643,6 +665,31 @@ void wayland_window_surface_update_wayland_surface(struct window_surface *window
     else if (!wws->wayland_surface && wws->wayland_buffer_queue)
     {
         wayland_window_surface_destroy_buffer_queue(wws);
+    }
+
+    window_surface->funcs->unlock(window_surface);
+}
+
+/***********************************************************************
+ *           wayland_window_surface_update_layered
+ */
+void wayland_window_surface_update_layered(struct window_surface *window_surface,
+                                           COLORREF color_key, BYTE alpha)
+{
+    struct wayland_window_surface *wws = wayland_window_surface_cast(window_surface);
+
+    window_surface->funcs->lock(window_surface);
+
+    if (alpha != wws->alpha || color_key != wws->color_key)
+        *window_surface->funcs->get_bounds(window_surface) = wws->header.rect;
+
+    wws->alpha = alpha;
+    wws->color_key = color_key;
+
+    if (wws->wayland_buffer_queue &&
+        wws->wayland_buffer_queue->format != get_preferred_format(wws))
+    {
+        recreate_wayland_buffer_queue(wws);
     }
 
     window_surface->funcs->unlock(window_surface);

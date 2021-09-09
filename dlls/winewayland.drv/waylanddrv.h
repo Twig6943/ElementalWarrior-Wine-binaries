@@ -405,13 +405,16 @@ void wayland_buffer_queue_add_damage(struct wayland_buffer_queue *queue, HRGN da
  *          Wayland window surface
  */
 
-struct window_surface *wayland_window_surface_create(HWND hwnd, const RECT *rect) DECLSPEC_HIDDEN;
+struct window_surface *wayland_window_surface_create(HWND hwnd, const RECT *rect,
+                                                     COLORREF color_key, BYTE alpha) DECLSPEC_HIDDEN;
 void wayland_window_surface_flush(struct window_surface *window_surface) DECLSPEC_HIDDEN;
 BOOL wayland_window_surface_needs_flush(struct window_surface *surface) DECLSPEC_HIDDEN;
 void wayland_window_surface_update_wayland_surface(struct window_surface *surface,
                                                    struct wayland_surface *wayland_surface) DECLSPEC_HIDDEN;
 void wayland_window_surface_set_window_region(struct window_surface *window_surface,
                                               HRGN win_region) DECLSPEC_HIDDEN;
+void wayland_window_surface_update_layered(struct window_surface *window_surface,
+                                           COLORREF color_key, BYTE alpha) DECLSPEC_HIDDEN;
 void wayland_clear_window_surface_last_flushed(HWND hwnd) DECLSPEC_HIDDEN;
 
 /**********************************************************************
@@ -523,7 +526,9 @@ INT WAYLAND_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size) DECLSPEC_HIDDEN
 UINT WAYLAND_MapVirtualKeyEx(UINT code, UINT maptype, HKL hkl) DECLSPEC_HIDDEN;
 BOOL WAYLAND_ProcessEvents(DWORD mask) DECLSPEC_HIDDEN;
 void WAYLAND_SetCursor(HCURSOR hcursor) DECLSPEC_HIDDEN;
+void WAYLAND_SetLayeredWindowAttributes(HWND hwnd, COLORREF key, BYTE alpha, DWORD flags) DECLSPEC_HIDDEN;
 void WAYLAND_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw) DECLSPEC_HIDDEN;
+void WAYLAND_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style) DECLSPEC_HIDDEN;
 UINT WAYLAND_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp) DECLSPEC_HIDDEN;
 LRESULT WAYLAND_SysCommand(HWND hwnd, WPARAM wparam, LPARAM lparam) DECLSPEC_HIDDEN;
 INT WAYLAND_ToUnicodeEx(UINT virt, UINT scan, const BYTE *state,

@@ -915,6 +915,9 @@ BOOL WAYLAND_WindowPosChanging(HWND hwnd, HWND insert_after, UINT swp_flags,
     DWORD style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
     HWND parent = NtUserGetAncestor(hwnd, GA_PARENT);
     RECT surface_rect;
+    DWORD flags;
+    COLORREF color_key;
+    BYTE alpha;
 
     TRACE("win %p window %s client %s visible %s style %08x ex %08x flags %08x after %p\n",
           hwnd, wine_dbgstr_rect(window_rect), wine_dbgstr_rect(client_rect),
@@ -952,7 +955,16 @@ BOOL WAYLAND_WindowPosChanging(HWND hwnd, HWND insert_after, UINT swp_flags,
     }
 
     /* Create new window surface. */
-    *surface = wayland_window_surface_create(data->hwnd, &surface_rect);
+    color_key = alpha = flags = 0;
+    if (!(exstyle & WS_EX_LAYERED) ||
+        !NtUserGetLayeredWindowAttributes(hwnd, &color_key, &alpha, &flags))
+    {
+        flags = 0;
+    }
+    if (!(flags & LWA_COLORKEY)) color_key = CLR_INVALID;
+    if (!(flags & LWA_ALPHA)) alpha = 255;
+
+    *surface = wayland_window_surface_create(data->hwnd, &surface_rect, color_key, alpha);
 
 done:
     wayland_win_data_release(data);
@@ -1026,6 +1038,49 @@ void WAYLAND_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw)
     {
         if (data->window_surface)
             wayland_window_surface_set_window_region(data->window_surface, hrgn);
+        wayland_win_data_release(data);
+    }
+}
+
+/***********************************************************************
+ *           WAYLAND_SetWindowStyle
+ */
+void WAYLAND_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style)
+{
+    struct wayland_win_data *data;
+    DWORD changed = style->styleNew ^ style->styleOld;
+
+    TRACE("hwnd=%p offset=%d changed=%#x\n", hwnd, offset, (UINT)changed);
+
+    if (hwnd == NtUserGetDesktopWindow()) return;
+    if (!(data = wayland_win_data_get(hwnd))) return;
+
+    if (offset == GWL_EXSTYLE && (changed & WS_EX_LAYERED))
+    {
+        TRACE("hwnd=%p changed layered\n", hwnd);
+        if (data->window_surface)
+            wayland_window_surface_update_layered(data->window_surface, CLR_INVALID, 255);
+    }
+
+    wayland_win_data_release(data);
+}
+
+/***********************************************************************
+ *	     WAYLAND_SetLayeredWindowAttributes
+ */
+void WAYLAND_SetLayeredWindowAttributes(HWND hwnd, COLORREF key, BYTE alpha, DWORD flags)
+{
+    struct wayland_win_data *data;
+
+    TRACE("hwnd=%p\n", hwnd);
+
+    if (!(flags & LWA_COLORKEY)) key = CLR_INVALID;
+    if (!(flags & LWA_ALPHA)) alpha = 255;
+
+    if ((data = wayland_win_data_get(hwnd)))
+    {
+        if (data->window_surface)
+            wayland_window_surface_update_layered(data->window_surface, key, alpha);
         wayland_win_data_release(data);
     }
 }

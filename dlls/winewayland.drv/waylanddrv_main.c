@@ -131,6 +131,7 @@ static const struct user_driver_funcs waylanddrv_funcs =
     .pShowWindow = WAYLAND_ShowWindow,
     .pSysCommand = WAYLAND_SysCommand,
     .pToUnicodeEx = WAYLAND_ToUnicodeEx,
+    .pUpdateLayeredWindow = WAYLAND_UpdateLayeredWindow,
     .pVkKeyScanEx = WAYLAND_VkKeyScanEx,
     .pThreadDetach = WAYLAND_ThreadDetach,
     .pUpdateDisplayDevices = WAYLAND_UpdateDisplayDevices,

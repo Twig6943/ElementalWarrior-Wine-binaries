@@ -406,7 +406,8 @@ void wayland_buffer_queue_add_damage(struct wayland_buffer_queue *queue, HRGN da
  */
 
 struct window_surface *wayland_window_surface_create(HWND hwnd, const RECT *rect,
-                                                     COLORREF color_key, BYTE alpha) DECLSPEC_HIDDEN;
+                                                     COLORREF color_key, BYTE alpha,
+                                                     BOOL src_alpha) DECLSPEC_HIDDEN;
 void wayland_window_surface_flush(struct window_surface *window_surface) DECLSPEC_HIDDEN;
 BOOL wayland_window_surface_needs_flush(struct window_surface *surface) DECLSPEC_HIDDEN;
 void wayland_window_surface_update_wayland_surface(struct window_surface *surface,
@@ -414,7 +415,8 @@ void wayland_window_surface_update_wayland_surface(struct window_surface *surfac
 void wayland_window_surface_set_window_region(struct window_surface *window_surface,
                                               HRGN win_region) DECLSPEC_HIDDEN;
 void wayland_window_surface_update_layered(struct window_surface *window_surface,
-                                           COLORREF color_key, BYTE alpha) DECLSPEC_HIDDEN;
+                                           COLORREF color_key, BYTE alpha,
+                                           BOOL src_alpha) DECLSPEC_HIDDEN;
 void wayland_clear_window_surface_last_flushed(HWND hwnd) DECLSPEC_HIDDEN;
 
 /**********************************************************************
@@ -549,6 +551,8 @@ INT WAYLAND_ToUnicodeEx(UINT virt, UINT scan, const BYTE *state,
                         LPWSTR buf, int nchars, UINT flags, HKL hkl) DECLSPEC_HIDDEN;
 BOOL WAYLAND_UpdateDisplayDevices(const struct gdi_device_manager *device_manager,
                                   BOOL force, void *param) DECLSPEC_HIDDEN;
+BOOL WAYLAND_UpdateLayeredWindow(HWND hwnd, const UPDATELAYEREDWINDOWINFO *info,
+                                 const RECT *window_rect) DECLSPEC_HIDDEN;
 SHORT WAYLAND_VkKeyScanEx(WCHAR ch, HKL hkl) DECLSPEC_HIDDEN;
 LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) DECLSPEC_HIDDEN;
 void WAYLAND_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,

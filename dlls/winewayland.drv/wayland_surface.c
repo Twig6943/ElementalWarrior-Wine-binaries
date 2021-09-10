@@ -33,6 +33,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
+static void wayland_surface_set_main_output(struct wayland_surface *surface,
+                                            struct wayland_output *output);
+
 static void post_configure(void *data)
 {
     HWND hwnd = (HWND)data;
@@ -155,6 +158,96 @@ static const struct xdg_toplevel_listener xdg_toplevel_listener = {
     handle_xdg_toplevel_close,
 };
 
+/* Gets the output we consider to be the origin of this surface.
+ * If the surface can be fullscreen this is the topleft-most output that
+ * fully contains this surface, otherwise it's the topleft-most output
+ * that partially contains this surface. */
+static struct wayland_output *wayland_surface_get_origin_output(
+        struct wayland_surface *surface)
+{
+    struct wayland_output_ref *ref;
+    struct wayland_output *topleft = NULL;
+    struct wayland_output *containing = NULL;
+    RECT window_rect;
+
+    NtUserGetWindowRect(surface->hwnd, &window_rect);
+
+    wl_list_for_each(ref, &surface->output_ref_list, link)
+    {
+        if (surface->window_fullscreen)
+        {
+            RECT monitor_rect;
+            struct wayland_output_mode *mode = ref->output->current_mode;
+
+            SetRect(&monitor_rect, ref->output->x, ref->output->y,
+                    ref->output->x + (mode ? mode->width : 0),
+                    ref->output->y + (mode ? mode->height : 0));
+
+            if ((!containing || ref->output->x < containing->x ||
+                 (ref->output->x == containing->x && ref->output->y < containing->y)) &&
+                contains_rect(&window_rect, &monitor_rect))
+            {
+                containing = ref->output;
+            }
+        }
+
+        if (!topleft || ref->output->x < topleft->x ||
+            (ref->output->x == topleft->x && ref->output->y < topleft->y))
+            topleft = ref->output;
+    }
+
+    return containing ? containing : topleft;
+}
+
+static void handle_wl_surface_enter(void *data,
+                                    struct wl_surface *wl_surface,
+                                    struct wl_output *wl_output)
+{
+    struct wayland_surface *surface = data;
+    struct wayland_output *output =
+        wl_output ? wl_output_get_user_data(wl_output) : NULL;
+    struct wayland_output_ref *ref;
+    struct wayland_output *origin;
+
+    /* We want enter/leave events only for toplevels */
+    if (!surface->xdg_toplevel) return;
+
+    if (!output || output->wayland != surface->wayland) return;
+
+    TRACE("hwnd=%p output->name=%s\n", surface->hwnd, output->name);
+
+    ref = calloc(1, sizeof(*ref));
+    if (!ref) { ERR("memory allocation failed"); return; }
+    ref->output = output;
+    wl_list_insert(&surface->output_ref_list, &ref->link);
+
+    origin = wayland_surface_get_origin_output(surface);
+    wayland_surface_set_main_output(surface, origin);
+}
+
+static void handle_wl_surface_leave(void *data,
+                                    struct wl_surface *wl_surface,
+                                    struct wl_output *wl_output)
+{
+    struct wayland_surface *surface = data;
+    struct wayland_output *output =
+        wl_output ? wl_output_get_user_data(wl_output) : NULL;
+
+    /* We want enter/leave events only for toplevels */
+    if (!surface->xdg_toplevel) return;
+
+    if (!output || output->wayland != surface->wayland) return;
+
+    TRACE("hwnd=%p output->name=%s\n", surface->hwnd, output->name);
+
+    wayland_surface_leave_output(surface, output);
+}
+
+static const struct wl_surface_listener wl_surface_listener = {
+    handle_wl_surface_enter,
+    handle_wl_surface_leave,
+};
+
 /**********************************************************************
  *          wayland_surface_create_plain
  *
@@ -179,10 +272,11 @@ struct wayland_surface *wayland_surface_create_plain(struct wayland *wayland)
     if (!surface->wl_surface)
         goto err;
 
+    wl_list_init(&surface->output_ref_list);
     wl_list_init(&surface->link);
     wl_list_init(&surface->parent_link);
     wl_list_init(&surface->child_list);
-    wl_surface_set_user_data(surface->wl_surface, surface);
+    wl_surface_add_listener(surface->wl_surface, &wl_surface_listener, surface);
     /* Plain surfaces are unmappable, so don't draw on them. */
     surface->drawing_allowed = FALSE;
 
@@ -278,6 +372,8 @@ void wayland_surface_make_subsurface(struct wayland_surface *surface,
     if (!surface->wl_subsurface)
         goto err;
     wl_subsurface_set_desync(surface->wl_subsurface);
+
+    surface->main_output = parent->main_output;
 
     wl_surface_commit(surface->wl_surface);
 
@@ -550,6 +646,7 @@ void wayland_surface_destroy(struct wayland_surface *surface)
     struct wayland_pointer *pointer = &surface->wayland->pointer;
     struct wayland_keyboard *keyboard = &surface->wayland->keyboard;
     struct wayland_surface *child, *child_tmp;
+    struct wayland_output_ref *ref, *ref_tmp;
 
     TRACE("surface=%p hwnd=%p\n", surface, surface->hwnd);
 
@@ -570,6 +667,12 @@ void wayland_surface_destroy(struct wayland_surface *surface)
         wl_list_init(&child->parent_link);
     }
     wayland_mutex_unlock(&surface->mutex);
+
+    wl_list_for_each_safe(ref, ref_tmp, &surface->output_ref_list, link)
+    {
+        wl_list_remove(&ref->link);
+        free(ref);
+    }
 
     if (surface->xdg_toplevel)
     {
@@ -799,4 +902,79 @@ void wayland_surface_unref(struct wayland_surface *surface)
 
     if (ref == 0)
         wayland_surface_destroy(surface);
+}
+
+static void wayland_surface_tree_set_main_output(struct wayland_surface *surface,
+                                                 struct wayland_output *output)
+{
+    struct wayland_surface *child;
+
+    surface->main_output = output;
+
+    wayland_mutex_lock(&surface->mutex);
+
+    wl_list_for_each(child, &surface->child_list, parent_link)
+        wayland_surface_tree_set_main_output(child, output);
+
+    wayland_mutex_unlock(&surface->mutex);
+}
+
+/**********************************************************************
+ *          wayland_surface_set_main_output
+ *
+ * Sets the main output for a surface, i.e., the output whose scale will be
+ * used for surface scaling.
+ */
+static void wayland_surface_set_main_output(struct wayland_surface *surface,
+                                            struct wayland_output *output)
+{
+    /* Don't update non-toplevels. */
+    if (surface->parent) return;
+
+    TRACE("surface=%p output->name=%s => output->name=%s\n",
+          surface,
+          surface->main_output ? surface->main_output->name : NULL,
+          output ? output->name : NULL);
+
+    if (surface->main_output != output)
+    {
+        wayland_surface_tree_set_main_output(surface, output);
+        if (surface->hwnd)
+            send_message(surface->hwnd, WM_WAYLAND_SURFACE_OUTPUT_CHANGE, 0, 0);
+    }
+}
+
+/**********************************************************************
+ *          wayland_surface_leave_output
+ *
+ * Removes an output from the set of outputs a surface is presented on.
+ *
+ * It is OK to call this function even if the surface is not presented
+ * on the specified output, in which case this function is a NOP.
+ */
+void wayland_surface_leave_output(struct wayland_surface *surface,
+                                  struct wayland_output *output)
+{
+    struct wayland_output_ref *ref, *tmp;
+
+    /* Don't update non-toplevels. */
+    if (surface->parent) return;
+
+    wl_list_for_each_safe(ref, tmp, &surface->output_ref_list, link)
+    {
+        if (ref->output == output)
+        {
+            wl_list_remove(&ref->link);
+            free(ref);
+            break;
+        }
+    }
+
+    if (surface->main_output == output)
+    {
+        struct wayland_output *origin =
+            wayland_surface_get_origin_output(surface);
+
+        wayland_surface_set_main_output(surface, origin);
+    }
 }

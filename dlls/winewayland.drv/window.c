@@ -665,6 +665,9 @@ static BOOL wayland_win_data_update_wayland_xdg_state(struct wayland_win_data *d
               data->hwnd, wine_dbgstr_rect(&data->restore_rect));
     }
 
+    /* Mark in the surface whether the associated window is fullscreen. */
+    wsurface->window_fullscreen = data->fullscreen;
+
     TRACE("hwnd=%p current state maximized=%d fullscreen=%d\n",
           data->hwnd, data->maximized, data->fullscreen);
 
@@ -1446,6 +1449,72 @@ static void handle_wm_wayland_configure(HWND hwnd)
     }
 }
 
+static void handle_wm_wayland_surface_output_change(HWND hwnd)
+{
+    struct wayland_win_data *data;
+    struct wayland_surface *wsurface;
+
+    TRACE("hwnd=%p\n", hwnd);
+
+    data = wayland_win_data_get(hwnd);
+    if (!data || !data->wayland_surface || !data->wayland_surface->xdg_surface)
+    {
+        TRACE("hwnd=%p has no suitable wayland surface, returning\n", hwnd);
+        goto out;
+    }
+
+    wsurface = data->wayland_surface;
+
+    if (wsurface->main_output)
+    {
+        struct wayland_surface_configure *conf;
+        int wine_width = 0;
+        int wine_height = 0;
+        UINT swp_flags = SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER |
+                         SWP_NOSENDCHANGING | SWP_NOSIZE;
+        int x = wsurface->main_output->x;
+        int y = wsurface->main_output->y;
+
+        TRACE("moving window to %d,%d\n", x, y);
+
+        if (wsurface->pending.serial)
+            conf = &wsurface->pending;
+        else if (wsurface->current.serial)
+            conf = &wsurface->current;
+        else
+            conf = NULL;
+
+        /* If we have a configuration that has size requirements (maximized or
+         * fullscreen), resize the window to ensure it matches the expected
+         * Wayland size (taking the new output scale into account). */
+        if (conf && conf->width > 0 && conf->height > 0 &&
+            ((conf->configure_flags & WAYLAND_CONFIGURE_FLAG_MAXIMIZED) ||
+             (conf->configure_flags & WAYLAND_CONFIGURE_FLAG_FULLSCREEN)))
+        {
+            wayland_surface_coords_to_wine(wsurface,
+                                           conf->width, conf->height,
+                                           &wine_width, &wine_height);
+
+            TRACE("resizing using %s configuration wayland=%dx%d wine=%dx%d\n",
+                  conf == &wsurface->pending ? "pending" : "current",
+                  conf->width, conf->height,
+                  wine_width, wine_height);
+
+            swp_flags &= ~SWP_NOSIZE;
+            /* Treat the resize as part of compositor initiated configuration. */
+            data->handling_wayland_configure_event = TRUE;
+            data->wayland_configure_event_flags = conf->configure_flags;
+        }
+
+        NtUserSetWindowPos(hwnd, 0, x, y, wine_width, wine_height, swp_flags);
+
+        data->handling_wayland_configure_event = FALSE;
+    }
+
+out:
+    wayland_win_data_release(data);
+}
+
 /**********************************************************************
  *           WAYLAND_DesktopWindowProc
  */
@@ -1514,6 +1583,9 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 wayland_win_data_release(data);
             }
         }
+        break;
+    case WM_WAYLAND_SURFACE_OUTPUT_CHANGE:
+        handle_wm_wayland_surface_output_change(hwnd);
         break;
     default:
         FIXME("got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (long)wp, lp);

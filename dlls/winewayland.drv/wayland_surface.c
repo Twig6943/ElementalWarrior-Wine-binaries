@@ -180,6 +180,8 @@ struct wayland_surface *wayland_surface_create_plain(struct wayland *wayland)
         goto err;
 
     wl_list_init(&surface->link);
+    wl_list_init(&surface->parent_link);
+    wl_list_init(&surface->child_list);
     wl_surface_set_user_data(surface->wl_surface, surface);
     /* Plain surfaces are unmappable, so don't draw on them. */
     surface->drawing_allowed = FALSE;
@@ -264,6 +266,11 @@ void wayland_surface_make_subsurface(struct wayland_surface *surface,
     surface->drawing_allowed = TRUE;
 
     surface->parent = wayland_surface_ref(parent);
+
+    wayland_mutex_lock(&parent->mutex);
+    wl_list_insert(&parent->child_list, &surface->parent_link);
+    wayland_mutex_unlock(&parent->mutex);
+
     surface->wl_subsurface =
         wl_subcompositor_get_subsurface(wayland->wl_subcompositor,
                                         surface->wl_surface,
@@ -296,6 +303,17 @@ void wayland_surface_clear_role(struct wayland_surface *surface)
     TRACE("surface=%p hwnd=%p\n", surface, surface->hwnd);
 
     surface->drawing_allowed = FALSE;
+
+    if (surface->parent)
+    {
+        wayland_mutex_lock(&surface->parent->mutex);
+        wl_list_remove(&surface->parent_link);
+        wl_list_init(&surface->parent_link);
+        wayland_mutex_unlock(&surface->parent->mutex);
+
+        wayland_surface_unref(surface->parent);
+        surface->parent = NULL;
+    }
 
     if (surface->xdg_toplevel)
     {
@@ -531,6 +549,7 @@ void wayland_surface_destroy(struct wayland_surface *surface)
 {
     struct wayland_pointer *pointer = &surface->wayland->pointer;
     struct wayland_keyboard *keyboard = &surface->wayland->keyboard;
+    struct wayland_surface *child, *child_tmp;
 
     TRACE("surface=%p hwnd=%p\n", surface, surface->hwnd);
 
@@ -539,6 +558,18 @@ void wayland_surface_destroy(struct wayland_surface *surface)
 
     if (keyboard->focused_surface == surface)
         keyboard->focused_surface = NULL;
+
+    /* There are children left only when we force a destruction during
+     * thread deinitialization, otherwise the children hold a reference
+     * to the parent and won't let it be destroyed. */
+    wayland_mutex_lock(&surface->mutex);
+    wl_list_for_each_safe(child, child_tmp, &surface->child_list, parent_link)
+    {
+        child->parent = NULL;
+        wl_list_remove(&child->parent_link);
+        wl_list_init(&child->parent_link);
+    }
+    wayland_mutex_unlock(&surface->mutex);
 
     if (surface->xdg_toplevel)
     {
@@ -567,6 +598,10 @@ void wayland_surface_destroy(struct wayland_surface *surface)
 
     if (surface->parent)
     {
+        wayland_mutex_lock(&surface->parent->mutex);
+        wl_list_remove(&surface->parent_link);
+        wayland_mutex_unlock(&surface->parent->mutex);
+
         wayland_surface_unref(surface->parent);
         surface->parent = NULL;
     }

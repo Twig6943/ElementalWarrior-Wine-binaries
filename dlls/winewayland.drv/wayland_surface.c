@@ -812,8 +812,10 @@ void wayland_surface_coords_from_wine(struct wayland_surface *surface,
                                       int wine_x, int wine_y,
                                       double *wayland_x, double *wayland_y)
 {
-    *wayland_x = wine_x;
-    *wayland_y = wine_y;
+    double scale = wayland_surface_get_buffer_scale(surface);
+
+    *wayland_x = wine_x / scale;
+    *wayland_y = wine_y / scale;
 }
 
 /**********************************************************************
@@ -841,8 +843,10 @@ void wayland_surface_coords_to_wine(struct wayland_surface *surface,
                                     double wayland_x, double wayland_y,
                                     int *wine_x, int *wine_y)
 {
-    *wine_x = round(wayland_x);
-    *wine_y = round(wayland_y);
+    double scale = wayland_surface_get_buffer_scale(surface);
+
+    *wine_x = round(wayland_x * scale);
+    *wine_y = round(wayland_y * scale);
 }
 
 static void dummy_buffer_release(void *data, struct wl_buffer *buffer)
@@ -1042,4 +1046,22 @@ void wayland_surface_set_wine_output(struct wayland_surface *surface,
           output ? output->name : NULL);
 
     wayland_surface_tree_set_main_output(surface, output);
+}
+
+/**********************************************************************
+ *          wayland_surface_get_buffer_scale
+ *
+ */
+double wayland_surface_get_buffer_scale(struct wayland_surface *surface)
+{
+    /* Use the toplevel surface to get the scale */
+    struct wayland_surface *toplevel = surface;
+    double scale = 1.0;
+
+    while (toplevel->parent) toplevel = toplevel->parent;
+
+    if (surface->main_output) scale = surface->main_output->scale;
+
+    TRACE("hwnd=%p (toplevel=%p) => scale=%.2f\n", surface->hwnd, toplevel->hwnd, scale);
+    return scale;
 }

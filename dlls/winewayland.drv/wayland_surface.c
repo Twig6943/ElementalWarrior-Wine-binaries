@@ -478,6 +478,9 @@ void wayland_surface_reconfigure_position(struct wayland_surface *surface,
  *
  * The coordinates and sizes should be given in wine's coordinate space.
  *
+ * Note that this doesn't configure any associated GL/VK subsurface,
+ * wayland_surface_reconfigure_glvk() needs to be called separately.
+ *
  * This function sets up but doesn't actually apply any new configuration.
  * The wayland_surface_reconfigure_apply() needs to be called for changes
  * to take effect.
@@ -550,21 +553,6 @@ void wayland_surface_reconfigure_size(struct wayland_surface *surface,
         else
             wp_viewport_set_destination(surface->wp_viewport, -1, -1);
     }
-}
-
-/**********************************************************************
- *          wayland_surface_reconfigure_apply
- *
- * Applies the configuration set by previous calls to the
- * wayland_surface_reconfigure{_glvk}() functions.
- */
-void wayland_surface_reconfigure_apply(struct wayland_surface *surface)
-{
-    wl_surface_commit(surface->wl_surface);
-
-    /* Commit the parent so any subsurface repositioning takes effect. */
-    if (surface->parent)
-        wl_surface_commit(surface->parent->wl_surface);
 }
 
 /**********************************************************************
@@ -762,6 +750,197 @@ void wayland_surface_destroy(struct wayland_surface *surface)
     free(surface);
 }
 
+static struct wayland_surface *wayland_surface_create_glvk_common(struct wayland_surface *surface)
+{
+    struct wayland_surface *glvk;
+
+    TRACE("surface=%p hwnd=%p\n", surface, surface->hwnd);
+
+    glvk = wayland_surface_create_plain(surface->wayland);
+    if (!glvk)
+        goto err;
+
+    glvk->parent = wayland_surface_ref(surface);
+
+    wayland_mutex_lock(&glvk->parent->mutex);
+    wl_list_insert(&glvk->parent->child_list, &glvk->parent_link);
+    wayland_mutex_unlock(&glvk->parent->mutex);
+
+    glvk->wl_subsurface =
+        wl_subcompositor_get_subsurface(glvk->wayland->wl_subcompositor,
+                                        glvk->wl_surface,
+                                        surface->wl_surface);
+    if (!glvk->wl_subsurface)
+        goto err;
+    wl_subsurface_set_desync(glvk->wl_subsurface);
+    /* Place the glvk subsurface just above the parent surface, so that it
+     * doesn't end up obscuring any other subsurfaces. */
+    wl_subsurface_place_above(glvk->wl_subsurface, surface->wl_surface);
+
+    glvk->hwnd = surface->hwnd;
+    glvk->main_output = surface->main_output;
+    glvk->role = WAYLAND_SURFACE_ROLE_SUBSURFACE;
+
+    return glvk;
+
+err:
+    if (glvk)
+        wayland_surface_destroy(glvk);
+
+    return NULL;
+}
+
+static struct wayland_surface *wayland_surface_ref_glvk(struct wayland_surface *surface)
+{
+    struct wayland_surface *glvk = NULL;
+    wayland_mutex_lock(&surface->mutex);
+    if (surface->glvk)
+        glvk = wayland_surface_ref(surface->glvk);
+    wayland_mutex_unlock(&surface->mutex);
+    return glvk;
+}
+
+/**********************************************************************
+ *          wayland_surface_create_glvk
+ *
+ * Creates a GL/VK subsurface for this wayland surface.
+ */
+BOOL wayland_surface_create_or_ref_glvk(struct wayland_surface *surface)
+{
+    struct wayland_surface *glvk;
+    RECT client_rect;
+
+    TRACE("surface=%p hwnd=%p\n", surface, surface->hwnd);
+
+    if (wayland_surface_ref_glvk(surface))
+        return TRUE;
+
+    glvk = wayland_surface_create_glvk_common(surface);
+    if (!glvk)
+        goto err;
+
+    wayland_mutex_lock(&surface->mutex);
+    surface->glvk = glvk;
+    wayland_mutex_unlock(&surface->mutex);
+
+    /* Set initial position in the client area. */
+    wayland_get_client_rect_in_win_top_left_coords(surface->hwnd, &client_rect);
+
+    wayland_surface_reconfigure_glvk(surface,
+                                     client_rect.left, client_rect.top,
+                                     client_rect.right - client_rect.left,
+                                     client_rect.bottom - client_rect.top);
+
+    wayland_surface_reconfigure_apply(surface);
+
+    return TRUE;
+
+err:
+    if (glvk)
+        wayland_surface_destroy(glvk);
+
+    return FALSE;
+}
+
+/**********************************************************************
+ *          wayland_surface_unref_glvk
+ *
+ * Unreferences the associated GL/VK subsurface for this wayland surface.
+ */
+void wayland_surface_unref_glvk(struct wayland_surface *surface)
+{
+    struct wayland_surface *glvk_to_destroy = NULL;
+    int ref = -12345;
+
+    wayland_mutex_lock(&surface->mutex);
+    if (surface->glvk && (ref = InterlockedDecrement(&surface->glvk->ref)) == 0)
+    {
+        glvk_to_destroy = surface->glvk;
+        surface->glvk = NULL;
+    }
+    TRACE("surface=%p glvk=%p ref=%d->%d\n",
+          surface, glvk_to_destroy ? glvk_to_destroy : surface->glvk, ref + 1, ref);
+    wayland_mutex_unlock(&surface->mutex);
+
+    if (glvk_to_destroy)
+        wayland_surface_destroy(glvk_to_destroy);
+}
+
+/**********************************************************************
+ *          wayland_surface_reconfigure_glvk
+ *
+ * Configures the position and size of the GL/VK subsurface associated with
+ * a wayland surface.
+ *
+ * The coordinates and sizes should be given in wine's coordinate space.
+ *
+ * This function sets up but doesn't actually apply any new configuration.
+ * The wayland_surface_reconfigure_apply() needs to be called for changes
+ * to take effect.
+ */
+void wayland_surface_reconfigure_glvk(struct wayland_surface *surface,
+                                      int wine_x, int wine_y,
+                                      int wine_width, int wine_height)
+{
+    int x, y, width, height;
+    struct wayland_surface *glvk = wayland_surface_ref_glvk(surface);
+
+    if (!glvk)
+        return;
+
+    wayland_surface_coords_rounded_from_wine(surface, wine_x, wine_y, &x, &y);
+    wayland_surface_coords_rounded_from_wine(surface, wine_width, wine_height,
+                                             &width, &height);
+
+    TRACE("surface=%p hwnd=%p %d,%d+%dx%d %d,%d+%dx%d\n",
+          surface, surface->hwnd,
+          wine_x, wine_y, wine_width, wine_height,
+          x, y, width, height);
+
+    glvk->offset_x = wine_x;
+    glvk->offset_y = wine_y;
+
+    wl_subsurface_set_position(glvk->wl_subsurface, x, y);
+
+    /* Use a viewport, if supported, to ensure GL surfaces remain inside their
+     * parent's boundaries when resizing and also to handle display mode
+     * changes. If the size is invalid use a 1x1 destination (instead of
+     * unsetting with -1x-1) since many apps don't respect a GL/VK 0x0 size
+     * which can happen, e.g., when an app is minimized. */
+    if (glvk->wp_viewport)
+    {
+        if (width != 0 && height != 0)
+            wp_viewport_set_destination(glvk->wp_viewport, width, height);
+        else
+            wp_viewport_set_destination(glvk->wp_viewport, 1, 1);
+    }
+
+    wayland_surface_unref_glvk(surface);
+}
+
+/**********************************************************************
+ *          wayland_surface_reconfigure_apply
+ *
+ * Applies the configuration set by previous calls to the
+ * wayland_surface_reconfigure{_glvk}() functions.
+ */
+void wayland_surface_reconfigure_apply(struct wayland_surface *surface)
+{
+    struct wayland_surface *glvk = wayland_surface_ref_glvk(surface);
+
+    if (glvk)
+    {
+        wl_surface_commit(glvk->wl_surface);
+        wayland_surface_unref_glvk(surface);
+    }
+
+    wl_surface_commit(surface->wl_surface);
+
+    /* Commit the parent so any subsurface repositioning takes effect. */
+    if (surface->parent)
+        wl_surface_commit(surface->parent->wl_surface);
+}
+
 /**********************************************************************
  *          wayland_surface_unmap
  *
@@ -794,6 +973,10 @@ void wayland_surface_coords_to_screen(struct wayland_surface *surface,
                                    &wine_x, &wine_y);
 
     NtUserGetWindowRect(surface->hwnd, &window_rect);
+
+    /* Some wayland surfaces are offset relative to their window rect,
+     * e.g., GL subsurfaces. */
+    OffsetRect(&window_rect, surface->offset_x, surface->offset_y);
 
     *screen_x = wine_x + window_rect.left;
     *screen_y = wine_y + window_rect.top;

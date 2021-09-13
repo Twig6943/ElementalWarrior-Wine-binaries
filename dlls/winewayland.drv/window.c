@@ -895,6 +895,15 @@ static void wayland_win_data_update_wayland_surface_state(struct wayland_win_dat
                                              compat.bottom - compat.top);
     }
 
+    /* The GL/VK subsurface (if any), is positioned over the client area of the
+     * window. The position of the GL/VK subsurface is relative to the window
+     * top-left. */
+    wayland_surface_reconfigure_glvk(wsurface,
+                                     data->client_rect.left - data->window_rect.left,
+                                     data->client_rect.top - data->window_rect.top,
+                                     data->client_rect.right - data->client_rect.left,
+                                     data->client_rect.bottom - data->client_rect.top);
+
     if (wsurface->xdg_toplevel || wsurface->wl_subsurface)
         wsurface->drawing_allowed = TRUE;
 

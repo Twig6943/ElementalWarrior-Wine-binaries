@@ -223,6 +223,9 @@ struct wayland_surface
     struct xdg_toplevel *xdg_toplevel;
     struct wp_viewport *wp_viewport;
     struct wayland_surface *parent;
+    struct wayland_surface *glvk;
+    /* The offset of this surface relative to its owning win32 window */
+    int offset_x, offset_y;
     HWND hwnd;
     struct wayland_mutex mutex;
     struct wayland_surface_configure pending;
@@ -374,6 +377,10 @@ void wayland_surface_reconfigure_geometry(struct wayland_surface *surface,
 void wayland_surface_reconfigure_size(struct wayland_surface *surface,
                                       int width, int height) DECLSPEC_HIDDEN;
 void wayland_surface_reconfigure_apply(struct wayland_surface *surface) DECLSPEC_HIDDEN;
+BOOL wayland_surface_create_or_ref_glvk(struct wayland_surface *surface) DECLSPEC_HIDDEN;
+void wayland_surface_unref_glvk(struct wayland_surface *surface) DECLSPEC_HIDDEN;
+void wayland_surface_reconfigure_glvk(struct wayland_surface *surface, int x, int y,
+                                      int width, int height) DECLSPEC_HIDDEN;
 void wayland_surface_unmap(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 void wayland_surface_ack_pending_configure(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 void wayland_surface_coords_to_screen(struct wayland_surface *surface,

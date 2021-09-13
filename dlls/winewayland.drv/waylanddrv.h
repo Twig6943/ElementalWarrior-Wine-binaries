@@ -31,6 +31,7 @@
 #include <wayland-cursor.h>
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-compose.h>
+#include "viewporter-client-protocol.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -145,6 +146,7 @@ struct wayland
     struct xdg_wm_base *xdg_wm_base;
     struct wl_shm *wl_shm;
     struct wl_seat *wl_seat;
+    struct wp_viewporter *wp_viewporter;
     struct zxdg_output_manager_v1 *zxdg_output_manager_v1;
     uint32_t next_fallback_output_id;
     struct wl_list output_list;
@@ -212,6 +214,7 @@ struct wayland_surface
     struct wl_subsurface *wl_subsurface;
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *xdg_toplevel;
+    struct wp_viewport *wp_viewport;
     struct wayland_surface *parent;
     HWND hwnd;
     struct wayland_mutex mutex;
@@ -358,6 +361,8 @@ void wayland_surface_reconfigure_position(struct wayland_surface *surface,
                                           int x, int y) DECLSPEC_HIDDEN;
 void wayland_surface_reconfigure_geometry(struct wayland_surface *surface,
                                           int x, int y, int width, int height) DECLSPEC_HIDDEN;
+void wayland_surface_reconfigure_size(struct wayland_surface *surface,
+                                      int width, int height) DECLSPEC_HIDDEN;
 void wayland_surface_reconfigure_apply(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 void wayland_surface_unmap(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 void wayland_surface_ack_pending_configure(struct wayland_surface *surface) DECLSPEC_HIDDEN;

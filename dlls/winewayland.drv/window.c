@@ -820,6 +820,8 @@ static void wayland_win_data_update_wayland_surface_state(struct wayland_win_dat
         return;
     }
 
+    wayland_surface_reconfigure_size(wsurface, width, height);
+
     if (wsurface->wl_subsurface)
     {
         /* In addition to children windows, we manage some top level, popup window

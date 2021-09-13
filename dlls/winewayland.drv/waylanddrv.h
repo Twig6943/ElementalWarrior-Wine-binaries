@@ -53,6 +53,7 @@
 extern char *process_name DECLSPEC_HIDDEN;
 extern struct wl_display *process_wl_display DECLSPEC_HIDDEN;
 extern struct gbm_device *process_gbm_device DECLSPEC_HIDDEN;
+extern const struct user_driver_funcs waylanddrv_funcs DECLSPEC_HIDDEN;
 extern char *option_drm_device DECLSPEC_HIDDEN;
 extern BOOL option_use_system_cursors DECLSPEC_HIDDEN;
 
@@ -774,5 +775,14 @@ BOOL WAYLAND_WindowPosChanging(HWND hwnd, HWND insert_after, UINT swp_flags,
                                const RECT *window_rect, const RECT *client_rect,
                                RECT *visible_rect, struct window_surface **surface) DECLSPEC_HIDDEN;
 struct opengl_funcs *WAYLAND_wine_get_wgl_driver(UINT version) DECLSPEC_HIDDEN;
+
+/**********************************************************************
+ *          GDI driver functions
+ */
+
+BOOL CDECL WAYLAND_CreateDC(PHYSDEV *pdev, LPCWSTR device,
+                            LPCWSTR output, const DEVMODEW* initData) DECLSPEC_HIDDEN;
+BOOL CDECL WAYLAND_CreateCompatibleDC(PHYSDEV orig, PHYSDEV *pdev) DECLSPEC_HIDDEN;
+BOOL CDECL WAYLAND_DeleteDC(PHYSDEV dev) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_WAYLANDDRV_H */

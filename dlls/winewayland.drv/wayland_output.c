@@ -535,6 +535,7 @@ BOOL wayland_output_create(struct wayland *wayland, uint32_t id, uint32_t versio
 
     output->compositor_scale = 1.0;
     output->scale = 1.0;
+    output->wine_scale = 1.0;
 
     /* Have a fallback in case xdg_output is not supported or name is not sent. */
     output->name = malloc(20);

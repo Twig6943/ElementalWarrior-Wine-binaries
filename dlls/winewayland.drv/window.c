@@ -720,6 +720,25 @@ static BOOL wayland_win_data_update_wayland_xdg_state(struct wayland_win_data *d
     return TRUE;
 }
 
+static void wayland_win_data_get_wine_size_for_conf(struct wayland_win_data *data,
+                                                    struct wayland_surface_configure *conf,
+                                                    int *wine_width, int *wine_height)
+{
+    if ((conf->configure_flags & WAYLAND_CONFIGURE_FLAG_FULLSCREEN) &&
+        !(conf->configure_flags & WAYLAND_CONFIGURE_FLAG_MAXIMIZED))
+    {
+        wayland_surface_find_wine_fullscreen_fit(data->wayland_surface,
+                                                 conf->width, conf->height,
+                                                 wine_width, wine_height);
+    }
+    else
+    {
+        wayland_surface_coords_to_wine(data->wayland_surface,
+                                       conf->width, conf->height,
+                                       wine_width, wine_height);
+    }
+}
+
 static void wayland_win_data_get_rect_in_monitor(struct wayland_win_data *data,
                                                  enum wayland_configure_flags flags,
                                                  RECT *rect)
@@ -759,11 +778,10 @@ static void wayland_win_data_get_compatible_rect(struct wayland_win_data *data,
         data->wayland_surface->current.configure_flags;
 
     /* Get the window size corresponding to the Wayland surface configuration. */
-    wayland_surface_coords_to_wine(data->wayland_surface,
-                                   data->wayland_surface->current.width,
-                                   data->wayland_surface->current.height,
-                                   &wine_conf_width,
-                                   &wine_conf_height);
+    wayland_win_data_get_wine_size_for_conf(data,
+                                            &data->wayland_surface->current,
+                                            &wine_conf_width,
+                                            &wine_conf_height);
 
     /* If Wayland requires a surface size smaller than what wine provides,
      * use part of the window contents for the surface. */
@@ -1415,8 +1433,8 @@ static void handle_wm_wayland_configure(HWND hwnd)
         wsurface->pending.height = height;
     }
 
-    wayland_surface_coords_to_wine(wsurface, width, height,
-                                   &wine_width, &wine_height);
+    wayland_win_data_get_wine_size_for_conf(data, &wsurface->pending,
+                                            &wine_width, &wine_height);
 
     TRACE("hwnd=%p effective_size=%dx%d wine_size=%dx%d\n",
           data->hwnd, width, height, wine_width, wine_height);
@@ -1537,9 +1555,8 @@ static void handle_wm_wayland_surface_output_change(HWND hwnd, UINT serial,
             ((conf->configure_flags & WAYLAND_CONFIGURE_FLAG_MAXIMIZED) ||
              (conf->configure_flags & WAYLAND_CONFIGURE_FLAG_FULLSCREEN)))
         {
-            wayland_surface_coords_to_wine(wsurface,
-                                           conf->width, conf->height,
-                                           &wine_width, &wine_height);
+            wayland_win_data_get_wine_size_for_conf(data, conf,
+                                                    &wine_width, &wine_height);
 
             TRACE("resizing using %s configuration wayland=%dx%d wine=%dx%d\n",
                   conf == &wsurface->pending ? "pending" : "current",

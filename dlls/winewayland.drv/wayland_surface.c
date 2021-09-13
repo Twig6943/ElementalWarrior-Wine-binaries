@@ -177,7 +177,7 @@ static struct wayland_output *wayland_surface_get_origin_output(
         if (surface->window_fullscreen)
         {
             RECT monitor_rect;
-            struct wayland_output_mode *mode = ref->output->current_mode;
+            struct wayland_output_mode *mode = ref->output->current_wine_mode;
 
             SetRect(&monitor_rect, ref->output->x, ref->output->y,
                     ref->output->x + (mode ? mode->width : 0),

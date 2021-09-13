@@ -141,8 +141,8 @@ static void wayland_add_device_monitor(const struct gdi_device_manager *device_m
     struct gdi_monitor monitor = {0};
 
     SetRect(&monitor.rc_monitor, output->x, output->y,
-            output->x + output->current_mode->width,
-            output->y + output->current_mode->height);
+            output->x + output->current_wine_mode->width,
+            output->y + output->current_wine_mode->height);
 
     /* We don't have a direct way to get the work area in Wayland. */
     monitor.rc_work = monitor.rc_monitor;
@@ -208,7 +208,7 @@ static struct wayland_output *wayland_get_primary_output(struct wayland *wayland
 
     wl_list_for_each(output, &wayland->output_list, link)
     {
-        if (output->current_mode && output->x == 0 && output->y == 0)
+        if (output->current_wine_mode && output->x == 0 && output->y == 0)
             return output;
     }
 
@@ -245,7 +245,7 @@ BOOL WAYLAND_UpdateDisplayDevices(const struct gdi_device_manager *device_manage
 
     wl_list_for_each(output, &wayland->output_list, link)
     {
-        if (!output->current_mode || output == primary) continue;
+        if (!output->current_wine_mode || output == primary) continue;
         wayland_add_device_output(device_manager, param, output, output_id);
         output_id++;
     }
@@ -260,10 +260,10 @@ static BOOL wayland_get_current_devmode(struct wayland *wayland, LPCWSTR name, D
     struct wayland_output *output;
 
     output = wayland_output_get_by_wine_name(wayland, name);
-    if (!output || !output->current_mode)
+    if (!output || !output->current_wine_mode)
         return FALSE;
 
-    populate_devmode(output->current_mode, mode);
+    populate_devmode(output->current_wine_mode, mode);
 
     mode->dmFields |= DM_POSITION;
     mode->dmPosition.x = output->x;
@@ -307,10 +307,10 @@ static INT wayland_get_current_bpp(struct wayland *wayland, LPCWSTR name)
     struct wayland_output *output;
 
     output = wayland_output_get_by_wine_name(wayland, name);
-    if (!output || !output->current_mode)
+    if (!output || !output->current_wine_mode)
         return 0;
 
-    return output->current_mode->bpp;
+    return output->current_wine_mode->bpp;
 }
 
 /***********************************************************************

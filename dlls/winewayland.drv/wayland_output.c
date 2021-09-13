@@ -128,7 +128,10 @@ static void wayland_output_add_mode(struct wayland_output *output,
             /* Upgrade modes from virtual to native, never the reverse. */
             if (native) mode->native = TRUE;
             if (current)
+            {
                 output->current_mode = mode;
+                output->current_wine_mode = mode;
+            }
             return;
         }
         else if (cmp == 1) /* mode > new */
@@ -147,7 +150,10 @@ static void wayland_output_add_mode(struct wayland_output *output,
     mode->native = native;
 
     if (current)
+    {
         output->current_mode = mode;
+        output->current_wine_mode = mode;
+    }
 
     wl_list_insert(insert_after_link, &mode->link);
 }

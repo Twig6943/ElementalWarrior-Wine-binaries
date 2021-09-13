@@ -181,6 +181,7 @@ struct wayland_output
     struct zxdg_output_v1 *zxdg_output_v1;
     struct wl_list mode_list;
     struct wayland_output_mode *current_mode;
+    struct wayland_output_mode *current_wine_mode;
     int logical_x, logical_y;  /* logical position */
     int logical_w, logical_h;  /* logical size */
     int x, y;  /* position in native pixel coordinate space */

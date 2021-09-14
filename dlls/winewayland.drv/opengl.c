@@ -72,6 +72,59 @@ DECL_FUNCPTR(eglGetProcAddress);
 DECL_FUNCPTR(eglInitialize);
 #undef DECL_FUNCPTR
 
+static inline BOOL is_onscreen_pixel_format(int format)
+{
+    return format > 0 && format <= nb_onscreen_formats;
+}
+
+/***********************************************************************
+ *		wayland_wglDescribePixelFormat
+ */
+static int wayland_wglDescribePixelFormat(HDC hdc, int fmt, UINT size,
+                                          PIXELFORMATDESCRIPTOR *pfd)
+{
+    EGLint val;
+    EGLConfig config;
+
+    if (!pfd) return nb_onscreen_formats;
+    if (!is_onscreen_pixel_format(fmt)) return 0;
+    if (size < sizeof(*pfd)) return 0;
+    config = pixel_formats[fmt - 1].config;
+
+    memset(pfd, 0, sizeof(*pfd));
+    pfd->nSize = sizeof(*pfd);
+    pfd->nVersion = 1;
+    pfd->dwFlags = PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW | PFD_DOUBLEBUFFER |
+                   PFD_SUPPORT_COMPOSITION;
+    pfd->iPixelType = PFD_TYPE_RGBA;
+    pfd->iLayerType = PFD_MAIN_PLANE;
+
+    p_eglGetConfigAttrib(egl_display, config, EGL_BUFFER_SIZE, &val);
+    pfd->cColorBits = val;
+    p_eglGetConfigAttrib(egl_display, config, EGL_RED_SIZE, &val);
+    pfd->cRedBits = val;
+    p_eglGetConfigAttrib(egl_display, config, EGL_GREEN_SIZE, &val);
+    pfd->cGreenBits = val;
+    p_eglGetConfigAttrib(egl_display, config, EGL_BLUE_SIZE, &val);
+    pfd->cBlueBits = val;
+    p_eglGetConfigAttrib(egl_display, config, EGL_ALPHA_SIZE, &val);
+    pfd->cAlphaBits = val;
+    p_eglGetConfigAttrib(egl_display, config, EGL_DEPTH_SIZE, &val);
+    pfd->cDepthBits = val;
+    p_eglGetConfigAttrib(egl_display, config, EGL_STENCIL_SIZE, &val);
+    pfd->cStencilBits = val;
+
+    pfd->cAlphaShift = 0;
+    pfd->cBlueShift = pfd->cAlphaShift + pfd->cAlphaBits;
+    pfd->cGreenShift = pfd->cBlueShift + pfd->cBlueBits;
+    pfd->cRedShift = pfd->cGreenShift + pfd->cGreenBits;
+
+    TRACE("fmt %u color %u %u/%u/%u/%u depth %u stencil %u\n",
+           fmt, pfd->cColorBits, pfd->cRedBits, pfd->cGreenBits, pfd->cBlueBits,
+           pfd->cAlphaBits, pfd->cDepthBits, pfd->cStencilBits);
+    return nb_onscreen_formats;
+}
+
 /***********************************************************************
  *		wayland_wglGetProcAddress
  */
@@ -555,6 +608,7 @@ static struct opengl_funcs egl_funcs =
 {
     .wgl =
     {
+        .p_wglDescribePixelFormat = wayland_wglDescribePixelFormat,
         .p_wglGetProcAddress = wayland_wglGetProcAddress,
     },
 #define USE_GL_FUNC(name) (void *)glstub_##name,

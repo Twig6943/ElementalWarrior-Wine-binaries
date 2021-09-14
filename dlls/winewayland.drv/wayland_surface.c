@@ -518,6 +518,68 @@ void wayland_surface_coords_to_wine(struct wayland_surface *surface,
     *wine_y = round(wayland_y);
 }
 
+static void dummy_buffer_release(void *data, struct wl_buffer *buffer)
+{
+    struct wayland_shm_buffer *shm_buffer = data;
+
+    TRACE("shm_buffer=%p\n", shm_buffer);
+
+    wayland_shm_buffer_destroy(shm_buffer);
+}
+
+static const struct wl_buffer_listener dummy_buffer_listener = {
+    dummy_buffer_release
+};
+
+/**********************************************************************
+ *          wayland_surface_ensure_mapped
+ *
+ * Ensure that the wayland surface is mapped, by committing a dummy
+ * buffer if necessary.
+ */
+void wayland_surface_ensure_mapped(struct wayland_surface *surface)
+{
+    wayland_mutex_lock(&surface->mutex);
+
+    /* If this is a subsurface, ensure its parent is also mapped. */
+    if (surface->parent)
+        wayland_surface_ensure_mapped(surface->parent);
+
+    TRACE("surface=%p hwnd=%p mapped=%d\n",
+          surface, surface->hwnd, surface->mapped);
+
+    if (!surface->mapped)
+    {
+        int width = surface->current.width;
+        int height = surface->current.height;
+        int wine_width, wine_height;
+        struct wayland_shm_buffer *dummy_shm_buffer;
+        HRGN damage;
+
+        /* Use a large enough width/height, so even when the target
+         * surface is scaled by the compositor, this will not end up
+         * being 0x0. */
+        if (width == 0) width = 32;
+        if (height == 0) height = 32;
+
+        wayland_surface_coords_to_wine(surface, width, height,
+                                       &wine_width, &wine_height);
+
+        dummy_shm_buffer = wayland_shm_buffer_create(surface->wayland,
+                                                     wine_width, wine_height,
+                                                     WL_SHM_FORMAT_ARGB8888);
+        wl_buffer_add_listener(dummy_shm_buffer->wl_buffer,
+                               &dummy_buffer_listener, dummy_shm_buffer);
+
+        damage = NtGdiCreateRectRgn(0, 0, wine_width, wine_height);
+        if (!wayland_surface_commit_buffer(surface, dummy_shm_buffer, damage))
+            wayland_shm_buffer_destroy(dummy_shm_buffer);
+        NtGdiDeleteObjectApp(damage);
+    }
+
+    wayland_mutex_unlock(&surface->mutex);
+}
+
 /**********************************************************************
  *          wayland_surface_ref
  *

@@ -69,6 +69,17 @@ struct wayland_gl_drawable
     struct wayland_surface *wayland_surface;
     struct gbm_surface *gbm_surface;
     EGLSurface      surface;
+    struct wl_event_queue *wl_event_queue;
+    struct wl_list  buffer_list;
+};
+
+struct wayland_gl_buffer
+{
+    struct wl_list  link;
+    struct wayland_gl_drawable *gl;
+    struct gbm_bo *gbm_bo;
+    struct gbm_surface *gbm_surface;
+    struct wayland_dmabuf_buffer *dmabuf_buffer;
 };
 
 struct wgl_context
@@ -78,6 +89,7 @@ struct wgl_context
     EGLContext context;
     HWND       draw_hwnd;
     HWND       read_hwnd;
+    LONG       refresh;
     BOOL       has_been_current;
     BOOL       sharing;
     int        *attribs;
@@ -114,6 +126,7 @@ DECL_FUNCPTR(eglGetProcAddress);
 DECL_FUNCPTR(eglInitialize);
 DECL_FUNCPTR(eglMakeCurrent);
 DECL_FUNCPTR(eglQueryString);
+DECL_FUNCPTR(eglSwapBuffers);
 #undef DECL_FUNCPTR
 
 static inline BOOL is_onscreen_pixel_format(int format)
@@ -143,6 +156,12 @@ static struct wayland_gl_drawable *wayland_gl_drawable_create(HWND hwnd, int for
     gl->hwnd = hwnd;
     gl->format = format;
     gl->wayland_surface = wayland_surface;
+    if (gl->wayland_surface)
+    {
+        gl->wl_event_queue = wl_display_create_queue(wayland_surface->wayland->wl_display);
+        if (!gl->wl_event_queue) goto err;
+    }
+    wl_list_init(&gl->buffer_list);
 
     wayland_mutex_lock(&gl_object_mutex);
     wl_list_insert(&gl_drawables, &gl->link);
@@ -152,9 +171,34 @@ err:
     if (gl)
     {
         if (gl->wayland_surface) wayland_surface_unref_glvk(gl->wayland_surface);
+        if (gl->wl_event_queue) wl_event_queue_destroy(gl->wl_event_queue);
         free(gl);
     }
     return NULL;
+}
+
+static void wayland_gl_buffer_destroy(struct wayland_gl_buffer *gl_buffer)
+{
+    TRACE("gl_buffer=%p bo=%p\n", gl_buffer, gl_buffer->gbm_bo);
+    wl_list_remove(&gl_buffer->link);
+    if (gl_buffer->dmabuf_buffer)
+        wayland_dmabuf_buffer_destroy(gl_buffer->dmabuf_buffer);
+    gbm_bo_set_user_data(gl_buffer->gbm_bo, NULL, NULL);
+    free(gl_buffer);
+}
+
+static void wayland_gl_buffer_release(struct wayland_gl_buffer *gl_buffer)
+{
+    TRACE("gl_buffer=%p bo=%p\n", gl_buffer, gl_buffer->gbm_bo);
+    gbm_surface_release_buffer(gl_buffer->gbm_surface, gl_buffer->gbm_bo);
+}
+
+static void wayland_gl_drawable_clear_buffers(struct wayland_gl_drawable *gl)
+{
+    struct wayland_gl_buffer *gl_buffer, *tmp;
+
+    wl_list_for_each_safe(gl_buffer, tmp, &gl->buffer_list, link)
+        wayland_gl_buffer_destroy(gl_buffer);
 }
 
 static void wayland_destroy_gl_drawable(HWND hwnd)
@@ -166,10 +210,12 @@ static void wayland_destroy_gl_drawable(HWND hwnd)
     {
         if (gl->hwnd != hwnd) continue;
         wl_list_remove(&gl->link);
+        wayland_gl_drawable_clear_buffers(gl);
         if (gl->surface) p_eglDestroySurface(egl_display, gl->surface);
         if (gl->gbm_surface) gbm_surface_destroy(gl->gbm_surface);
         if (gl->wayland_surface)
             wayland_surface_unref_glvk(gl->wayland_surface);
+        if (gl->wl_event_queue) wl_event_queue_destroy(gl->wl_event_queue);
         free(gl);
         break;
     }
@@ -217,6 +263,7 @@ static BOOL wgl_context_make_current(struct wgl_context *ctx, HWND draw_hwnd, HW
     {
         ctx->draw_hwnd = draw_hwnd;
         ctx->read_hwnd = read_hwnd;
+        InterlockedExchange(&ctx->refresh, FALSE);
         ctx->has_been_current = TRUE;
         NtCurrentTeb()->glContext = ctx;
     }
@@ -296,6 +343,7 @@ static void wayland_gl_drawable_update(struct wayland_gl_drawable *gl)
 
     TRACE("hwnd=%p\n", gl->hwnd);
 
+    wayland_gl_drawable_clear_buffers(gl);
     if (gl->surface) p_eglDestroySurface(egl_display, gl->surface);
     if (gl->gbm_surface) gbm_surface_destroy(gl->gbm_surface);
 
@@ -326,6 +374,8 @@ static void wayland_gl_drawable_update(struct wayland_gl_drawable *gl)
                   gl->hwnd, ctx, NtCurrentTeb()->glContext == ctx ? "" : "not ");
             if (NtCurrentTeb()->glContext == ctx)
                 wgl_context_make_current(ctx, ctx->draw_hwnd, ctx->read_hwnd);
+            else
+                InterlockedExchange(&ctx->refresh, TRUE);
         }
     }
 
@@ -333,6 +383,144 @@ static void wayland_gl_drawable_update(struct wayland_gl_drawable *gl)
           gl->hwnd, gl->gbm_surface, gl->surface);
 
     NtUserRedrawWindow(gl->hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE);
+}
+
+static BOOL wayland_gl_surface_feedback_has_update(struct wayland_gl_drawable *gl)
+{
+    struct wayland_dmabuf_surface_feedback *surface_feedback =
+        gl->wayland_surface ? gl->wayland_surface->glvk->surface_feedback : NULL;
+    BOOL ret = FALSE;
+
+    if (surface_feedback)
+    {
+        wayland_dmabuf_surface_feedback_lock(surface_feedback);
+        ret = surface_feedback->surface_needs_update;
+        surface_feedback->surface_needs_update = FALSE;
+        wayland_dmabuf_surface_feedback_unlock(surface_feedback);
+    }
+
+    TRACE("hwnd=%p => %d\n", gl->hwnd, ret);
+
+    return ret;
+}
+
+static BOOL wayland_gl_drawable_needs_resize(struct wayland_gl_drawable *gl)
+{
+    RECT client_rect;
+    BOOL ret;
+
+    NtUserGetClientRect(gl->hwnd, &client_rect);
+
+    ret = (client_rect.right > 0 && client_rect.bottom > 0 &&
+           (gl->width != client_rect.right || gl->height != client_rect.bottom));
+
+    TRACE("hwnd=%p client=%dx%d gl=%dx%d => %d\n",
+          gl->hwnd, (int)client_rect.right, (int)client_rect.bottom,
+          gl->width, gl->height, ret);
+
+    return ret;
+}
+
+static BOOL wayland_gl_drawable_needs_update(struct wayland_gl_drawable *gl)
+{
+    return wayland_gl_drawable_needs_resize(gl) || wayland_gl_surface_feedback_has_update(gl);
+}
+
+static void gbm_bo_destroy_callback(struct gbm_bo *bo, void *user_data)
+{
+    struct wayland_gl_buffer *gl_buffer = (struct wayland_gl_buffer *) user_data;
+    wayland_gl_buffer_destroy(gl_buffer);
+}
+
+static void dmabuf_buffer_release(void *data, struct wl_buffer *buffer)
+{
+    struct wayland_gl_buffer *gl_buffer = (struct wayland_gl_buffer *) data;
+
+    TRACE("bo=%p\n", gl_buffer->gbm_bo);
+    wayland_gl_buffer_release(gl_buffer);
+}
+
+static const struct wl_buffer_listener dmabuf_buffer_listener = {
+    dmabuf_buffer_release
+};
+
+static struct wayland_gl_buffer *wayland_gl_drawable_track_buffer(struct wayland_gl_drawable *gl,
+                                                                  struct gbm_bo *bo)
+{
+    struct wayland_gl_buffer *gl_buffer =
+        (struct wayland_gl_buffer *) gbm_bo_get_user_data(bo);
+
+    if (!gl_buffer)
+    {
+        struct wayland_native_buffer native_buffer;
+
+        gl_buffer = calloc(1, sizeof(*gl_buffer));
+        if (!gl_buffer) goto err;
+
+        wl_list_init(&gl_buffer->link);
+        gl_buffer->gbm_bo = bo;
+        gl_buffer->gbm_surface = gl->gbm_surface;
+        if (!wayland_native_buffer_init_gbm(&native_buffer, bo)) goto err;
+
+        if (gl->wayland_surface)
+        {
+            gl_buffer->dmabuf_buffer =
+                wayland_dmabuf_buffer_create_from_native(gl->wayland_surface->wayland,
+                                                         &native_buffer);
+            wayland_native_buffer_deinit(&native_buffer);
+            if (!gl_buffer->dmabuf_buffer) goto err;
+
+            wl_proxy_set_queue((struct wl_proxy *) gl_buffer->dmabuf_buffer->wl_buffer,
+                               gl->wl_event_queue);
+            wl_buffer_add_listener(gl_buffer->dmabuf_buffer->wl_buffer,
+                                   &dmabuf_buffer_listener, gl_buffer);
+        }
+
+        gbm_bo_set_user_data(bo, gl_buffer, gbm_bo_destroy_callback);
+        wl_list_insert(&gl->buffer_list, &gl_buffer->link);
+    }
+
+    return gl_buffer;
+
+err:
+    if (gl_buffer) wayland_gl_buffer_destroy(gl_buffer);
+    return NULL;
+}
+
+static BOOL wayland_gl_drawable_commit(struct wayland_gl_drawable *gl,
+                                       struct wayland_gl_buffer *gl_buffer)
+{
+    BOOL committed = FALSE;
+
+    if (!gl->wayland_surface) return FALSE;
+
+    wayland_mutex_lock(&gl->wayland_surface->mutex);
+    if (gl->wayland_surface->drawing_allowed)
+    {
+        struct wl_surface *gl_wl_surface = gl->wayland_surface->glvk->wl_surface;
+        wayland_surface_ensure_mapped(gl->wayland_surface);
+        wl_surface_attach(gl_wl_surface, gl_buffer->dmabuf_buffer->wl_buffer, 0, 0);
+        wl_surface_damage_buffer(gl_wl_surface, 0, 0, INT32_MAX, INT32_MAX);
+        wl_surface_commit(gl_wl_surface);
+        committed = TRUE;
+    }
+    wayland_mutex_unlock(&gl->wayland_surface->mutex);
+
+    return committed;
+}
+
+static BOOL wgl_context_refresh(struct wgl_context *ctx)
+{
+    BOOL ret = InterlockedExchange(&ctx->refresh, FALSE);
+
+    if (ret)
+    {
+        TRACE("refreshing context %p hwnd %p/%p\n",
+              ctx->context, ctx->draw_hwnd, ctx->read_hwnd);
+        wgl_context_make_current(ctx, ctx->draw_hwnd, ctx->read_hwnd);
+        NtUserRedrawWindow(ctx->draw_hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE);
+    }
+    return ret;
 }
 
 static BOOL set_pixel_format(HDC hdc, int format, BOOL allow_change)
@@ -490,6 +678,7 @@ static struct wgl_context *create_context(HDC hdc, struct wgl_context *share,
                                       ctx->attribs);
     ctx->draw_hwnd = 0;
     ctx->read_hwnd = 0;
+    ctx->refresh = FALSE;
     ctx->has_been_current = FALSE;
     ctx->sharing = FALSE;
 
@@ -773,6 +962,59 @@ static BOOL wayland_wglShareLists(struct wgl_context *org,
     }
 
     return FALSE;
+}
+
+/***********************************************************************
+ *		wayland_wglSwapBuffers
+ */
+static BOOL wayland_wglSwapBuffers(HDC hdc)
+{
+    struct wgl_context *ctx = NtCurrentTeb()->glContext;
+    HWND hwnd = NtUserWindowFromDC(hdc);
+    struct wayland_gl_drawable *draw_gl = wayland_gl_drawable_get(hwnd);
+
+    TRACE("hdc %p hwnd %p ctx %p\n", hdc, hwnd, ctx);
+
+    if (draw_gl && wayland_gl_drawable_needs_update(draw_gl))
+    {
+        wayland_gl_drawable_update(draw_gl);
+        goto out;
+    }
+
+    if ((!ctx || !wgl_context_refresh(ctx)) && draw_gl && draw_gl->surface)
+    {
+        struct wayland_gl_buffer *gl_buffer;
+        struct gbm_bo *bo;
+
+        p_eglSwapBuffers(egl_display, draw_gl->surface);
+
+        bo = gbm_surface_lock_front_buffer(draw_gl->gbm_surface);
+        if (!bo)
+        {
+            ERR("Failed to lock front buffer\n");
+            goto out;
+        }
+        gl_buffer = wayland_gl_drawable_track_buffer(draw_gl, bo);
+
+        if (!wayland_gl_drawable_commit(draw_gl, gl_buffer))
+            gbm_surface_release_buffer(gl_buffer->gbm_surface, gl_buffer->gbm_bo);
+
+        /* Wait until we have a free buffer for the application to render into
+         * before we continue. */
+        if (draw_gl->wayland_surface)
+        {
+            while (!gbm_surface_has_free_buffers(draw_gl->gbm_surface) &&
+                   wayland_dispatch_queue(draw_gl->wl_event_queue, -1) != -1)
+            {
+                continue;
+            }
+        }
+    }
+
+out:
+    wayland_gl_drawable_release(draw_gl);
+
+    return TRUE;
 }
 
 /***********************************************************************
@@ -1255,6 +1497,7 @@ static BOOL egl_init(void)
     LOAD_FUNCPTR(eglInitialize);
     LOAD_FUNCPTR(eglMakeCurrent);
     LOAD_FUNCPTR(eglQueryString);
+    LOAD_FUNCPTR(eglSwapBuffers);
 #undef LOAD_FUNCPTR
 
     if (!wayland_gbm_init()) return FALSE;
@@ -1297,6 +1540,7 @@ static struct opengl_funcs egl_funcs =
         .p_wglMakeCurrent = wayland_wglMakeCurrent,
         .p_wglSetPixelFormat = wayland_wglSetPixelFormat,
         .p_wglShareLists = wayland_wglShareLists,
+        .p_wglSwapBuffers = wayland_wglSwapBuffers,
     },
 #define USE_GL_FUNC(name) (void *)glstub_##name,
     .gl = { ALL_WGL_FUNCS }

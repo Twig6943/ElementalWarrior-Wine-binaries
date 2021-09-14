@@ -48,6 +48,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 #include "winternl.h"
 
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <assert.h>
 #include <dlfcn.h>
 #include <stdlib.h>
@@ -77,6 +78,7 @@ struct wgl_context
     EGLContext context;
     HWND       draw_hwnd;
     HWND       read_hwnd;
+    int        *attribs;
 };
 
 static void *egl_handle;
@@ -87,6 +89,7 @@ static struct opengl_funcs egl_funcs;
 static char wgl_extensions[4096];
 static struct wgl_pixel_format *pixel_formats;
 static int nb_pixel_formats, nb_onscreen_formats;
+static BOOL has_khr_create_context;
 
 static struct wayland_mutex gl_object_mutex =
 {
@@ -108,6 +111,7 @@ DECL_FUNCPTR(eglGetDisplay);
 DECL_FUNCPTR(eglGetProcAddress);
 DECL_FUNCPTR(eglInitialize);
 DECL_FUNCPTR(eglMakeCurrent);
+DECL_FUNCPTR(eglQueryString);
 #undef DECL_FUNCPTR
 
 static inline BOOL is_onscreen_pixel_format(int format)
@@ -375,7 +379,94 @@ static BOOL set_pixel_format(HDC hdc, int format, BOOL allow_change)
     return FALSE;
 }
 
-static struct wgl_context *create_context(HDC hdc)
+struct egl_attribs
+{
+    EGLint *data;
+    int count;
+};
+
+static void egl_attribs_init(struct egl_attribs *attribs)
+{
+    attribs->data = NULL;
+    attribs->count = 0;
+}
+
+static void egl_attribs_add(struct egl_attribs *attribs, EGLint name, EGLint value)
+{
+    EGLint *new_data = realloc(attribs->data,
+                               sizeof(*attribs->data) * (attribs->count + 2));
+    if (!new_data)
+    {
+        ERR("Could not allocate memory for EGL attributes!\n");
+        return;
+    }
+
+    attribs->data = new_data;
+    attribs->data[attribs->count] = name;
+    attribs->data[attribs->count + 1] = value;
+    attribs->count += 2;
+}
+
+
+static void egl_attribs_add_15_khr(struct egl_attribs *attribs, EGLint name, EGLint value)
+{
+    BOOL has_egl_15 = egl_version[0] == 1 && egl_version[1] >= 5;
+
+    if (!has_egl_15 && !has_khr_create_context)
+    {
+        WARN("Ignoring EGL context attrib %#x not supported by EGL %d.%d\n",
+             name, egl_version[0], egl_version[1]);
+        return;
+    }
+
+    if (name == EGL_CONTEXT_FLAGS_KHR && has_egl_15)
+    {
+        egl_attribs_add(attribs, EGL_CONTEXT_OPENGL_DEBUG,
+                        (value & WGL_CONTEXT_DEBUG_BIT_ARB) ?
+                             EGL_TRUE : EGL_FALSE);
+        egl_attribs_add(attribs,
+                        EGL_CONTEXT_OPENGL_FORWARD_COMPATIBLE,
+                        (value & WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB) ?
+                            EGL_TRUE : EGL_FALSE);
+    }
+    else
+    {
+        egl_attribs_add(attribs, name, value);
+    }
+}
+
+static EGLint *egl_attribs_steal_finished_data(struct egl_attribs *attribs)
+{
+    EGLint *data = NULL;
+
+    if (attribs->data)
+    {
+        data = realloc(attribs->data,
+                       sizeof(*attribs->data) * (attribs->count + 1));
+        if (!data)
+        {
+            ERR("Could not allocate memory for EGL attributes!\n");
+        }
+        else
+        {
+            data[attribs->count] = EGL_NONE;
+            attribs->data = NULL;
+            attribs->count = 0;
+        }
+    }
+
+    return data;
+}
+
+static void egl_attribs_deinit(struct egl_attribs *attribs)
+{
+    free(attribs->data);
+    attribs->data = NULL;
+    attribs->count = 0;
+}
+
+static struct wgl_context *create_context(HDC hdc, struct wgl_context *share,
+                                          struct egl_attribs *attribs)
 {
     struct wayland_gl_drawable *gl;
     struct wgl_context *ctx;
@@ -390,9 +481,10 @@ static struct wgl_context *create_context(HDC hdc)
     }
 
     ctx->config  = pixel_formats[gl->format - 1].config;
+    ctx->attribs = attribs ? egl_attribs_steal_finished_data(attribs) : NULL;
     ctx->context = p_eglCreateContext(egl_display, ctx->config,
-                                      EGL_NO_CONTEXT,
-                                      NULL);
+                                      share ? share->context : EGL_NO_CONTEXT,
+                                      ctx->attribs);
     ctx->draw_hwnd = 0;
     ctx->read_hwnd = 0;
 
@@ -428,7 +520,69 @@ static struct wgl_context *wayland_wglCreateContext(HDC hdc)
 
     p_eglBindAPI(EGL_OPENGL_API);
 
-    return create_context(hdc);
+    return create_context(hdc, NULL, NULL);
+}
+
+/***********************************************************************
+ *		wayland_wglCreateContextAttribsARB
+ */
+static struct wgl_context *wayland_wglCreateContextAttribsARB(HDC hdc,
+                                                              struct wgl_context *share,
+                                                              const int *attribs)
+{
+    struct egl_attribs egl_attribs = {0};
+    EGLenum api_type = EGL_OPENGL_API;
+    EGLenum profile_mask;
+    struct wgl_context *ctx;
+
+    egl_attribs_init(&egl_attribs);
+
+    TRACE("hdc=%p share=%p attribs=%p\n", hdc, share, attribs);
+
+    while (attribs && *attribs)
+    {
+        TRACE("%#x %#x\n", attribs[0], attribs[1]);
+        switch (*attribs)
+        {
+        case WGL_CONTEXT_PROFILE_MASK_ARB:
+            profile_mask = 0;
+            if (attribs[1] & WGL_CONTEXT_ES2_PROFILE_BIT_EXT)
+                api_type = EGL_OPENGL_ES_API;
+            if (attribs[1] & WGL_CONTEXT_CORE_PROFILE_BIT_ARB)
+                profile_mask |= EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT;
+            if (attribs[1] & WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB)
+                profile_mask |= EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT;
+            /* If the WGL profile mask doesn't have ES2 as the only set bit,
+             * pass the mask to EGL. Note that this will also pass empty
+             * WGL masks, in order to elicit the respective EGL error. */
+            if (attribs[1] != WGL_CONTEXT_ES2_PROFILE_BIT_EXT)
+            {
+                egl_attribs_add_15_khr(&egl_attribs,
+                                       EGL_CONTEXT_OPENGL_PROFILE_MASK, profile_mask);
+            }
+            break;
+        case WGL_CONTEXT_MAJOR_VERSION_ARB:
+            egl_attribs_add(&egl_attribs, EGL_CONTEXT_MAJOR_VERSION, attribs[1]);
+            break;
+        case WGL_CONTEXT_MINOR_VERSION_ARB:
+            egl_attribs_add_15_khr(&egl_attribs, EGL_CONTEXT_MINOR_VERSION, attribs[1]);
+            break;
+        case WGL_CONTEXT_FLAGS_ARB:
+            egl_attribs_add_15_khr(&egl_attribs, EGL_CONTEXT_FLAGS_KHR, attribs[1]);
+            break;
+        default:
+            FIXME("Unhandled attributes: %#x %#x\n", attribs[0], attribs[1]);
+        }
+        attribs += 2;
+    }
+
+    p_eglBindAPI(api_type);
+
+    ctx = create_context(hdc, share, &egl_attribs);
+
+    egl_attribs_deinit(&egl_attribs);
+
+    return ctx;
 }
 
 /***********************************************************************
@@ -440,6 +594,7 @@ static BOOL wayland_wglDeleteContext(struct wgl_context *ctx)
     wl_list_remove(&ctx->link);
     wayland_mutex_unlock(&gl_object_mutex);
     p_eglDestroyContext(egl_display, ctx->context);
+    free(ctx->attribs);
     free(ctx);
     return TRUE;
 }
@@ -595,9 +750,26 @@ static void register_extension(const char *ext)
     TRACE("%s\n", ext);
 }
 
+static BOOL has_extension(const char *list, const char *ext)
+{
+    size_t len = strlen(ext);
+    const char *cur = list;
+
+    if (!cur) return FALSE;
+
+    while ((cur = strstr(cur, ext)))
+    {
+        if ((!cur[len] || cur[len] == ' ') && (cur == list || cur[-1] == ' '))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 static void init_extensions(void)
 {
     void *ptr;
+    const char *egl_exts = p_eglQueryString(egl_display, EGL_EXTENSIONS);
 
     register_extension("WGL_ARB_extensions_string");
     egl_funcs.ext.p_wglGetExtensionsStringARB = wayland_wglGetExtensionsStringARB;
@@ -615,6 +787,13 @@ static void init_extensions(void)
     register_extension("WGL_ARB_make_current_read");
     egl_funcs.ext.p_wglGetCurrentReadDCARB   = (void *)1;  /* never called */
     egl_funcs.ext.p_wglMakeContextCurrentARB = wayland_wglMakeContextCurrentARB;
+
+    register_extension("WGL_ARB_create_context");
+    register_extension("WGL_ARB_create_context_profile");
+    egl_funcs.ext.p_wglCreateContextAttribsARB = wayland_wglCreateContextAttribsARB;
+
+    if (has_extension(egl_exts, "EGL_KHR_create_context"))
+        has_khr_create_context = TRUE;
 
     /* load standard functions and extensions exported from the OpenGL library */
 
@@ -1025,6 +1204,7 @@ static BOOL egl_init(void)
     LOAD_FUNCPTR(eglGetProcAddress);
     LOAD_FUNCPTR(eglInitialize);
     LOAD_FUNCPTR(eglMakeCurrent);
+    LOAD_FUNCPTR(eglQueryString);
 #undef LOAD_FUNCPTR
 
     if (!wayland_gbm_init()) return FALSE;

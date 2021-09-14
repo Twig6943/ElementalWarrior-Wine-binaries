@@ -131,6 +131,9 @@ DECL_FUNCPTR(eglQueryString);
 DECL_FUNCPTR(eglSwapBuffers);
 #undef DECL_FUNCPTR
 
+static void (*p_glFinish)(void);
+static void (*p_glFlush)(void);
+
 static inline BOOL is_onscreen_pixel_format(int format)
 {
     return format > 0 && format <= nb_onscreen_formats;
@@ -1081,6 +1084,26 @@ out:
     return TRUE;
 }
 
+static void wayland_glFinish(void)
+{
+    struct wgl_context *ctx = NtCurrentTeb()->glContext;
+
+    if (!ctx) return;
+    TRACE("hwnd %p egl_context %p\n", ctx->draw_hwnd, ctx->context);
+    wgl_context_refresh(ctx);
+    p_glFinish();
+}
+
+static void wayland_glFlush(void)
+{
+    struct wgl_context *ctx = NtCurrentTeb()->glContext;
+
+    if (!ctx) return;
+    TRACE("hwnd %p egl_context %p\n", ctx->draw_hwnd, ctx->context);
+    wgl_context_refresh(ctx);
+    p_glFlush();
+}
+
 /***********************************************************************
  *		wayland_wglGetSwapIntervalEXT
  */
@@ -1489,6 +1512,14 @@ static void init_extensions(void)
     LOAD_FUNCPTR(glVertexBindingDivisor);
     LOAD_FUNCPTR(glWaitSync);
 #undef LOAD_FUNCPTR
+
+    /* Redirect some standard OpenGL functions. */
+
+#define REDIRECT(func) \
+    do { p_##func = egl_funcs.gl.p_##func; egl_funcs.gl.p_##func = wayland_##func; } while(0)
+    REDIRECT(glFinish);
+    REDIRECT(glFlush);
+#undef REDIRECT
 }
 
 static BOOL init_pixel_formats(void)

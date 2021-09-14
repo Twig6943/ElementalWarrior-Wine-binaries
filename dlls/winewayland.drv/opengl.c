@@ -524,6 +524,24 @@ static int wayland_wglDescribePixelFormat(HDC hdc, int fmt, UINT size,
 }
 
 /***********************************************************************
+ *		wayland_wglGetPixelFormat
+ */
+static int wayland_wglGetPixelFormat(HDC hdc)
+{
+    struct wayland_gl_drawable *gl;
+    int ret = 0;
+
+    if ((gl = wayland_gl_drawable_get(NtUserWindowFromDC(hdc))))
+    {
+        ret = gl->format;
+        /* offscreen formats can't be used with traditional WGL calls */
+        if (!is_onscreen_pixel_format(ret)) ret = 1;
+        wayland_gl_drawable_release(gl);
+    }
+    return ret;
+}
+
+/***********************************************************************
  *		wayland_wglGetProcAddress
  */
 static PROC wayland_wglGetProcAddress(LPCSTR name)
@@ -1044,6 +1062,7 @@ static struct opengl_funcs egl_funcs =
         .p_wglCreateContext = wayland_wglCreateContext,
         .p_wglDeleteContext = wayland_wglDeleteContext,
         .p_wglDescribePixelFormat = wayland_wglDescribePixelFormat,
+        .p_wglGetPixelFormat = wayland_wglGetPixelFormat,
         .p_wglGetProcAddress = wayland_wglGetProcAddress,
         .p_wglMakeCurrent = wayland_wglMakeCurrent,
         .p_wglSetPixelFormat = wayland_wglSetPixelFormat,

@@ -55,6 +55,8 @@ struct wayland_window_surface
     void                 *bits;
     struct wayland_mutex  mutex;
     BOOL                  last_flush_failed;
+    void                 *front_bits; /* Front buffer pixels, stored bottom to top */
+    BOOL                  front_bits_dirty;
     BITMAPINFO            info;
 };
 
@@ -437,6 +439,30 @@ static void wayland_window_surface_copy_to_buffer(struct wayland_window_surface 
     free(rgndata);
 }
 
+static void wayland_window_surface_copy_front_to_buffer(struct wayland_window_surface *wws,
+                                                        struct wayland_shm_buffer *buffer)
+{
+    int width = min(wws->info.bmiHeader.biWidth, buffer->width);
+    int height = min(abs(wws->info.bmiHeader.biHeight), buffer->height);
+    int stride = width * 4;
+    unsigned char *src = wws->front_bits;
+    unsigned char *dst = buffer->map_data;
+    int src_stride = wws->info.bmiHeader.biWidth * 4;
+    int dst_stride = buffer->width * 4;
+    int i;
+
+    TRACE("front buffer %p -> %p %dx%d\n", src, dst, width, height);
+
+    /* Front buffer lines are stored bottom to top, so we need to flip
+     * when copying to our buffer. */
+    for (i = 0; i < height; i++)
+    {
+        memcpy(dst + (height - i - 1) * dst_stride,
+               src + i * src_stride,
+               stride);
+    }
+}
+
 /***********************************************************************
  *           wayland_window_surface_flush
  */
@@ -470,6 +496,31 @@ void wayland_window_surface_flush(struct window_surface *window_surface)
         {
             needs_flush = NtGdiCombineRgn(surface_damage_region, surface_damage_region,
                                           wws->total_region, RGN_AND);
+        }
+    }
+
+    /* If we have a front buffer we always copy it to the buffer before copying
+     * the window surface contents, so the whole surface is considered damaged.
+     * We also damage the whole surface if we just cleared the front buffer
+     * (i.e., front_bits == NULL and front_bits_dirty == TRUE). */
+    if (wws->front_bits || wws->front_bits_dirty)
+    {
+        needs_flush |= wws->front_bits_dirty;
+        if (needs_flush)
+        {
+            if (surface_damage_region)
+            {
+                NtGdiSetRectRgn(surface_damage_region,
+                                wws->header.rect.left, wws->header.rect.top,
+                                wws->header.rect.right, wws->header.rect.bottom);
+            }
+            else
+            {
+                surface_damage_region = NtGdiCreateRectRgn(wws->header.rect.left,
+                                                           wws->header.rect.top,
+                                                           wws->header.rect.right,
+                                                           wws->header.rect.bottom);
+            }
         }
     }
 
@@ -518,9 +569,13 @@ void wayland_window_surface_flush(struct window_surface *window_surface)
         goto done;
     }
 
-    last_buffer = get_last_flushed_buffer(wws->hwnd);
+    if (wws->front_bits)
+        wayland_window_surface_copy_front_to_buffer(wws, buffer);
 
-    if (last_buffer)
+    /* If we have a front buffer, the whole window is overwritten in every
+     * flush, and all "overlay" contents will need to be reapplied
+     * from the window surface, rather than from the last buffer. */
+    if (!wws->front_bits && (last_buffer = get_last_flushed_buffer(wws->hwnd)))
     {
         if (last_buffer != buffer)
         {
@@ -564,7 +619,11 @@ void wayland_window_surface_flush(struct window_surface *window_surface)
     update_last_flushed_buffer(wws->hwnd, buffer);
 
 done:
-    if (!wws->last_flush_failed) reset_bounds(&wws->bounds);
+    if (!wws->last_flush_failed)
+    {
+        reset_bounds(&wws->bounds);
+        wws->front_bits_dirty = FALSE;
+    }
     if (surface_damage_region) NtGdiDeleteObjectApp(surface_damage_region);
     window_surface->funcs->unlock(window_surface);
 }
@@ -585,6 +644,7 @@ static void wayland_window_surface_destroy(struct window_surface *window_surface
     if (wws->wayland_buffer_queue)
         wayland_window_surface_destroy_buffer_queue(wws);
     free(wws->bits);
+    free(wws->front_bits);
     free(wws);
 }
 
@@ -631,6 +691,8 @@ struct window_surface *wayland_window_surface_create(HWND hwnd, const RECT *rect
     wws->color_key    = color_key;
     wws->alpha        = alpha;
     wws->src_alpha    = src_alpha;
+    wws->front_bits   = NULL;
+    wws->front_bits_dirty = FALSE;
     wayland_window_surface_set_window_region(&wws->header, (HRGN)1);
     reset_bounds(&wws->bounds);
 
@@ -679,9 +741,13 @@ void wayland_window_surface_update_wayland_surface(struct window_surface *window
                     wws->info.bmiHeader.biWidth, abs(wws->info.bmiHeader.biHeight),
                     get_preferred_format(wws));
     }
-    else if (!wws->wayland_surface && wws->wayland_buffer_queue)
+    else if (!wws->wayland_surface)
     {
-        wayland_window_surface_destroy_buffer_queue(wws);
+        if (wws->wayland_buffer_queue)
+            wayland_window_surface_destroy_buffer_queue(wws);
+        free(wws->front_bits);
+        wws->front_bits = NULL;
+        wws->front_bits_dirty = FALSE;
     }
 
     window_surface->funcs->unlock(window_surface);
@@ -711,6 +777,52 @@ void wayland_window_surface_update_layered(struct window_surface *window_surface
         recreate_wayland_buffer_queue(wws);
     }
 
+    window_surface->funcs->unlock(window_surface);
+}
+
+/***********************************************************************
+ *           wayland_window_surface_update_front_buffer
+ */
+void wayland_window_surface_update_front_buffer(struct window_surface *window_surface,
+                                                void (*read_pixels)(void *pixels_out,
+                                                                    int width, int height))
+{
+    struct wayland_window_surface *wws = wayland_window_surface_cast(window_surface);
+
+    TRACE("hwnd=%p front_bits=%p read_pixels=%p size=%dx%d\n",
+          wws->hwnd, wws->front_bits, read_pixels,
+          (int)wws->info.bmiHeader.biWidth, abs(wws->info.bmiHeader.biHeight));
+
+    window_surface->funcs->lock(window_surface);
+
+    if (!read_pixels)
+    {
+        if (wws->front_bits)
+        {
+            free(wws->front_bits);
+            wws->front_bits = NULL;
+            /* When the front_bits are first invalidated, we mark them as dirty
+             * to force the next window_surface flush. */
+            wws->front_bits_dirty = TRUE;
+        }
+        goto out;
+    }
+
+    if (!wws->front_bits)
+        wws->front_bits = malloc(wws->info.bmiHeader.biSizeImage);
+
+    if (wws->front_bits)
+    {
+        (*read_pixels)(wws->front_bits, wws->info.bmiHeader.biWidth,
+                       abs(wws->info.bmiHeader.biHeight));
+        wws->front_bits_dirty = TRUE;
+    }
+    else
+    {
+        WARN("Failed to allocate memory for front buffer pixels\n");
+    }
+
+out:
     window_surface->funcs->unlock(window_surface);
 }
 

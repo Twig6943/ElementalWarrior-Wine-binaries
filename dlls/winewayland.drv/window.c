@@ -1715,6 +1715,14 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_WAYLAND_REAPPLY_CURSOR:
         wayland_reapply_thread_cursor();
         break;
+    case WM_WAYLAND_WINDOW_SURFACE_FLUSH:
+        {
+            struct wayland_win_data *data = wayland_win_data_get(hwnd);
+            if (data && data->window_surface)
+                wayland_window_surface_flush(data->window_surface);
+            wayland_win_data_release(data);
+        }
+        break;
     default:
         FIXME("got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (long)wp, lp);
     }
@@ -1765,4 +1773,35 @@ void wayland_get_client_rect_in_win_top_left_coords(HWND hwnd, RECT *client_rect
 err:
     ERR("Failed to get client rect for hwnd %p", hwnd);
     SetRectEmpty(client_rect);
+}
+
+/***********************************************************************
+ *           wayland_update_front_buffer
+ *
+ * Update the front buffer we keep for windows that require it (i.e.,
+ * use front buffer rendering). The front buffer is populated by calling
+ * the supplied read_pixels function, which should store the pixels in
+ * the supplied pixels_out memory location. If read_pixels is NULL, the
+ * front buffer is disabled.
+ *
+ * Note that the stored pixels are expected to be in BGRA8888 form with line
+ * order flipped upside down, i.e., starting with the bottom line (this
+ * is the order used, e.g., by glReadPixels).
+ */
+void wayland_update_front_buffer(HWND hwnd,
+                                 void (*read_pixels)(void *pixels_out,
+                                                     int width, int height))
+{
+    struct wayland_win_data *data;
+
+    if ((data = wayland_win_data_get(hwnd)) && data->window_surface)
+    {
+        wayland_window_surface_update_front_buffer(data->window_surface,
+                                                   read_pixels);
+
+        /* Trigger a redraw to apply any front buffer changes. */
+        NtUserPostMessage(hwnd, WM_WAYLAND_WINDOW_SURFACE_FLUSH, 0, 0);
+    }
+
+    wayland_win_data_release(data);
 }

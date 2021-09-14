@@ -44,6 +44,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 #undef GLAPIENTRY
 #include "wine/wgl_driver.h"
 
+#include "ntuser.h"
+
 #include <EGL/egl.h>
 #include <assert.h>
 #include <dlfcn.h>
@@ -55,6 +57,18 @@ struct wgl_pixel_format
     EGLint native_visual_id;
 };
 
+struct wayland_gl_drawable
+{
+    struct wl_list  link;
+    HWND            hwnd;
+    int             format;
+    int             width;
+    int             height;
+    struct wayland_surface *wayland_surface;
+    struct gbm_surface *gbm_surface;
+    EGLSurface      surface;
+};
+
 static void *egl_handle;
 static void *opengl_handle;
 static EGLDisplay egl_display;
@@ -64,7 +78,16 @@ static char wgl_extensions[4096];
 static struct wgl_pixel_format *pixel_formats;
 static int nb_pixel_formats, nb_onscreen_formats;
 
+static struct wayland_mutex gl_object_mutex =
+{
+    PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP, 0, 0, __FILE__ ": gl_object_mutex"
+};
+
+static struct wl_list gl_drawables = { &gl_drawables, &gl_drawables };
+
 #define DECL_FUNCPTR(f) static __typeof__(f) * p_##f = NULL
+DECL_FUNCPTR(eglCreateWindowSurface);
+DECL_FUNCPTR(eglDestroySurface);
 DECL_FUNCPTR(eglGetConfigAttrib);
 DECL_FUNCPTR(eglGetConfigs);
 DECL_FUNCPTR(eglGetDisplay);
@@ -75,6 +98,117 @@ DECL_FUNCPTR(eglInitialize);
 static inline BOOL is_onscreen_pixel_format(int format)
 {
     return format > 0 && format <= nb_onscreen_formats;
+}
+
+static struct wayland_gl_drawable *wayland_gl_drawable_create(HWND hwnd, int format)
+{
+    struct wayland_gl_drawable *gl;
+    struct wayland_surface *wayland_surface;
+
+    gl = calloc(1, sizeof(*gl));
+    if (!gl) return NULL;
+
+    wayland_surface = wayland_surface_for_hwnd_lock(hwnd);
+
+    TRACE("hwnd=%p wayland_surface=%p\n", hwnd, wayland_surface);
+
+    if (wayland_surface)
+    {
+        BOOL ref_gl = wayland_surface_create_or_ref_glvk(wayland_surface);
+        wayland_surface_for_hwnd_unlock(wayland_surface);
+        if (!ref_gl) goto err;
+    }
+
+    gl->hwnd = hwnd;
+    gl->format = format;
+    gl->wayland_surface = wayland_surface;
+
+    wayland_mutex_lock(&gl_object_mutex);
+    wl_list_insert(&gl_drawables, &gl->link);
+    return gl;
+
+err:
+    if (gl)
+    {
+        if (gl->wayland_surface) wayland_surface_unref_glvk(gl->wayland_surface);
+        free(gl);
+    }
+    return NULL;
+}
+
+static void wayland_destroy_gl_drawable(HWND hwnd)
+{
+    struct wayland_gl_drawable *gl;
+
+    wayland_mutex_lock(&gl_object_mutex);
+    wl_list_for_each(gl, &gl_drawables, link)
+    {
+        if (gl->hwnd != hwnd) continue;
+        wl_list_remove(&gl->link);
+        if (gl->surface) p_eglDestroySurface(egl_display, gl->surface);
+        if (gl->gbm_surface) gbm_surface_destroy(gl->gbm_surface);
+        if (gl->wayland_surface)
+            wayland_surface_unref_glvk(gl->wayland_surface);
+        free(gl);
+        break;
+    }
+    wayland_mutex_unlock(&gl_object_mutex);
+}
+
+static struct wayland_gl_drawable *wayland_gl_drawable_get(HWND hwnd)
+{
+    struct wayland_gl_drawable *gl;
+
+    if (!hwnd) return NULL;
+
+    wayland_mutex_lock(&gl_object_mutex);
+    wl_list_for_each(gl, &gl_drawables, link)
+    {
+        if (gl->hwnd == hwnd) return gl;
+    }
+    wayland_mutex_unlock(&gl_object_mutex);
+    return NULL;
+}
+
+static void wayland_gl_drawable_release(struct wayland_gl_drawable *gl)
+{
+    if (gl) wayland_mutex_unlock(&gl_object_mutex);
+}
+
+static struct gbm_surface *wayland_gl_create_gbm_surface(int width, int height,
+                                                         uint32_t drm_format)
+{
+    return gbm_surface_create(process_gbm_device, width, height, drm_format,
+                              GBM_BO_USE_RENDERING);
+}
+
+static void wayland_gl_drawable_update(struct wayland_gl_drawable *gl)
+{
+    RECT client_rect;
+
+    TRACE("hwnd=%p\n", gl->hwnd);
+
+    if (gl->surface) p_eglDestroySurface(egl_display, gl->surface);
+    if (gl->gbm_surface) gbm_surface_destroy(gl->gbm_surface);
+
+    NtUserGetClientRect(gl->hwnd, &client_rect);
+    gl->width = client_rect.right;
+    gl->height = client_rect.bottom;
+
+    gl->gbm_surface = wayland_gl_create_gbm_surface(gl->width, gl->height,
+                                                    pixel_formats[gl->format - 1].native_visual_id);
+    if (!gl->gbm_surface)
+        ERR("Failed to create GBM surface\n");
+
+    gl->surface = p_eglCreateWindowSurface(egl_display, pixel_formats[gl->format - 1].config,
+                                           (EGLNativeWindowType) gl->gbm_surface, NULL);
+    if (!gl->surface)
+        ERR("Failed to create EGL surface\n");
+
+    TRACE("hwnd=%p gbm_surface=%p egl_surface=%p\n",
+          gl->hwnd, gl->gbm_surface, gl->surface);
+
+    NtUserRedrawWindow(gl->hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE);
 }
 
 /***********************************************************************
@@ -570,6 +704,8 @@ static BOOL egl_init(void)
         if (!(p_##func = dlsym(egl_handle, #func))) \
         { ERR("can't find symbol %s\n", #func); return FALSE; }    \
     } while(0)
+    LOAD_FUNCPTR(eglCreateWindowSurface);
+    LOAD_FUNCPTR(eglDestroySurface);
     LOAD_FUNCPTR(eglGetConfigAttrib);
     LOAD_FUNCPTR(eglGetConfigs);
     LOAD_FUNCPTR(eglGetDisplay);

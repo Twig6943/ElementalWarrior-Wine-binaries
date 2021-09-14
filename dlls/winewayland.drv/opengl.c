@@ -78,6 +78,8 @@ struct wgl_context
     EGLContext context;
     HWND       draw_hwnd;
     HWND       read_hwnd;
+    BOOL       has_been_current;
+    BOOL       sharing;
     int        *attribs;
 };
 
@@ -215,6 +217,7 @@ static BOOL wgl_context_make_current(struct wgl_context *ctx, HWND draw_hwnd, HW
     {
         ctx->draw_hwnd = draw_hwnd;
         ctx->read_hwnd = read_hwnd;
+        ctx->has_been_current = TRUE;
         NtCurrentTeb()->glContext = ctx;
     }
 
@@ -487,6 +490,8 @@ static struct wgl_context *create_context(HDC hdc, struct wgl_context *share,
                                       ctx->attribs);
     ctx->draw_hwnd = 0;
     ctx->read_hwnd = 0;
+    ctx->has_been_current = FALSE;
+    ctx->sharing = FALSE;
 
     /* The gl_object_mutex, which is locked when we get the gl_drawable,
      * also guards access to gl_contexts, so it's safe to add the entry here. */
@@ -723,6 +728,51 @@ static BOOL wayland_wglSetPixelFormat(HDC hdc, int format,
 static BOOL wayland_wglSetPixelFormatWINE(HDC hdc, int format)
 {
     return set_pixel_format(hdc, format, TRUE);
+}
+
+/***********************************************************************
+ *		wayland_wglShareLists
+ */
+static BOOL wayland_wglShareLists(struct wgl_context *org,
+                                  struct wgl_context *dest)
+{
+    TRACE("(%p, %p)\n", org, dest);
+
+    /* Sharing of display lists works differently in EGL and WGL. In case of
+     * EGL it is done at context creation time but in case of EGL it can also
+     * be done using wglShareLists.
+     *
+     * We handle this by creating an EGL context in wglCreateContext /
+     * wglCreateContextAttribsARB and when a program requests sharing we
+     * recreate the destination context if it hasn't been made current and
+     * it hasn't shared display lists before.
+     */
+
+    if (dest->has_been_current)
+    {
+        ERR("Could not share display lists, the hglrc2 context has been current already!\n");
+        return FALSE;
+    }
+    else if (dest->sharing)
+    {
+        ERR("Could not share display lists because hglrc2 has already shared lists before!\n");
+        return FALSE;
+    }
+    else
+    {
+        /* Re-create the EGL context and share display lists */
+        p_eglDestroyContext(egl_display, dest->context);
+        dest->context = p_eglCreateContext(egl_display, dest->config,
+                                           org->context, dest->attribs);
+        TRACE("re-created EGL context (%p) for WGL context %p (config: %p) "
+              "sharing lists with EGL context %p for WGL context %p (config: %p)\n",
+              dest->context, dest, dest->config, org->context, org, org->config);
+        org->sharing = TRUE;
+        dest->sharing = TRUE;
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 /***********************************************************************
@@ -1246,6 +1296,7 @@ static struct opengl_funcs egl_funcs =
         .p_wglGetProcAddress = wayland_wglGetProcAddress,
         .p_wglMakeCurrent = wayland_wglMakeCurrent,
         .p_wglSetPixelFormat = wayland_wglSetPixelFormat,
+        .p_wglShareLists = wayland_wglShareLists,
     },
 #define USE_GL_FUNC(name) (void *)glstub_##name,
     .gl = { ALL_WGL_FUNCS }

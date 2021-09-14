@@ -45,6 +45,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 #include "wine/wgl_driver.h"
 
 #include "ntuser.h"
+#include "winternl.h"
 
 #include <EGL/egl.h>
 #include <assert.h>
@@ -106,6 +107,7 @@ DECL_FUNCPTR(eglGetConfigs);
 DECL_FUNCPTR(eglGetDisplay);
 DECL_FUNCPTR(eglGetProcAddress);
 DECL_FUNCPTR(eglInitialize);
+DECL_FUNCPTR(eglMakeCurrent);
 #undef DECL_FUNCPTR
 
 static inline BOOL is_onscreen_pixel_format(int format)
@@ -186,6 +188,36 @@ static struct wayland_gl_drawable *wayland_gl_drawable_get(HWND hwnd)
 static void wayland_gl_drawable_release(struct wayland_gl_drawable *gl)
 {
     if (gl) wayland_mutex_unlock(&gl_object_mutex);
+}
+
+static BOOL wgl_context_make_current(struct wgl_context *ctx, HWND draw_hwnd, HWND read_hwnd)
+{
+    BOOL ret;
+    struct wayland_gl_drawable *draw_gl = NULL, *read_gl = NULL;
+
+    draw_gl = wayland_gl_drawable_get(draw_hwnd);
+    read_gl = wayland_gl_drawable_get(read_hwnd);
+
+    TRACE("%p/%p context %p surface %p/%p\n",
+          draw_hwnd, read_hwnd, ctx->context,
+          draw_gl ? draw_gl->surface : NULL,
+          read_gl ? read_gl->surface : NULL);
+
+    ret = p_eglMakeCurrent(egl_display,
+                           draw_gl ? draw_gl->surface : NULL,
+                           read_gl ? read_gl->surface : NULL,
+                           ctx->context);
+    if (ret)
+    {
+        ctx->draw_hwnd = draw_hwnd;
+        ctx->read_hwnd = read_hwnd;
+        NtCurrentTeb()->glContext = ctx;
+    }
+
+    wayland_gl_drawable_release(read_gl);
+    wayland_gl_drawable_release(draw_gl);
+
+    return ret;
 }
 
 static struct gbm_surface *wayland_gl_create_gbm_surface(struct wayland_surface *glvk,
@@ -275,6 +307,20 @@ static void wayland_gl_drawable_update(struct wayland_gl_drawable *gl)
                                            (EGLNativeWindowType) gl->gbm_surface, NULL);
     if (!gl->surface)
         ERR("Failed to create EGL surface\n");
+
+    if (gl->surface)
+    {
+        struct wgl_context *ctx;
+
+        wl_list_for_each(ctx, &gl_contexts, link)
+        {
+            if (ctx->draw_hwnd != gl->hwnd && ctx->read_hwnd != gl->hwnd) continue;
+            TRACE("hwnd %p refreshing %p %scurrent\n",
+                  gl->hwnd, ctx, NtCurrentTeb()->glContext == ctx ? "" : "not ");
+            if (NtCurrentTeb()->glContext == ctx)
+                wgl_context_make_current(ctx, ctx->draw_hwnd, ctx->read_hwnd);
+        }
+    }
 
     TRACE("hwnd=%p gbm_surface=%p egl_surface=%p\n",
           gl->hwnd, gl->gbm_surface, gl->surface);
@@ -399,6 +445,37 @@ static BOOL wayland_wglDeleteContext(struct wgl_context *ctx)
 }
 
 /***********************************************************************
+ *		wayland_wglMakeContextCurrentARB
+ */
+static BOOL wayland_wglMakeContextCurrentARB(HDC draw_hdc, HDC read_hdc,
+                                             struct wgl_context *ctx)
+{
+    BOOL ret = FALSE;
+
+    TRACE("draw_hdc=%p read_hdc=%p ctx=%p\n", draw_hdc, read_hdc, ctx);
+
+    if (!ctx)
+    {
+        p_eglMakeCurrent(egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        NtCurrentTeb()->glContext = NULL;
+        return TRUE;
+    }
+
+    ret = wgl_context_make_current(ctx, NtUserWindowFromDC(draw_hdc), NtUserWindowFromDC(read_hdc));
+    if (!ret) RtlSetLastWin32Error(ERROR_INVALID_HANDLE);
+
+    return ret;
+}
+
+/***********************************************************************
+ *		wayland_wglMakeCurrent
+ */
+static BOOL wayland_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
+{
+    return wayland_wglMakeContextCurrentARB(hdc, hdc, ctx);
+}
+
+/***********************************************************************
  *		wayland_wglDescribePixelFormat
  */
 static int wayland_wglDescribePixelFormat(HDC hdc, int fmt, UINT size,
@@ -516,6 +593,10 @@ static void init_extensions(void)
      */
     register_extension("WGL_WINE_pixel_format_passthrough");
     egl_funcs.ext.p_wglSetPixelFormatWINE = wayland_wglSetPixelFormatWINE;
+
+    register_extension("WGL_ARB_make_current_read");
+    egl_funcs.ext.p_wglGetCurrentReadDCARB   = (void *)1;  /* never called */
+    egl_funcs.ext.p_wglMakeContextCurrentARB = wayland_wglMakeContextCurrentARB;
 
     /* load standard functions and extensions exported from the OpenGL library */
 
@@ -925,6 +1006,7 @@ static BOOL egl_init(void)
     LOAD_FUNCPTR(eglGetDisplay);
     LOAD_FUNCPTR(eglGetProcAddress);
     LOAD_FUNCPTR(eglInitialize);
+    LOAD_FUNCPTR(eglMakeCurrent);
 #undef LOAD_FUNCPTR
 
     if (!wayland_gbm_init()) return FALSE;
@@ -963,6 +1045,7 @@ static struct opengl_funcs egl_funcs =
         .p_wglDeleteContext = wayland_wglDeleteContext,
         .p_wglDescribePixelFormat = wayland_wglDescribePixelFormat,
         .p_wglGetProcAddress = wayland_wglGetProcAddress,
+        .p_wglMakeCurrent = wayland_wglMakeCurrent,
         .p_wglSetPixelFormat = wayland_wglSetPixelFormat,
     },
 #define USE_GL_FUNC(name) (void *)glstub_##name,

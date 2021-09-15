@@ -85,6 +85,12 @@ static void pointer_handle_motion_internal(void *data, struct wl_pointer *pointe
 static void pointer_handle_motion(void *data, struct wl_pointer *pointer,
                                   uint32_t time, wl_fixed_t sx, wl_fixed_t sy)
 {
+    struct wayland *wayland = data;
+
+    /* Don't handle absolute motion events if we are in relative mode. */
+    if (wayland->pointer.zwp_relative_pointer_v1)
+        return;
+
     pointer_handle_motion_internal(data, pointer, time, sx, sy);
 }
 
@@ -232,6 +238,47 @@ static const struct wl_pointer_listener pointer_listener = {
     pointer_handle_axis_discrete,
 };
 
+static void relative_pointer_handle_motion(void *data,
+                                           struct zwp_relative_pointer_v1 *rpointer,
+                                           uint32_t utime_hi,
+                                           uint32_t utime_lo,
+                                           wl_fixed_t dx,
+                                           wl_fixed_t dy,
+                                           wl_fixed_t dx_unaccel,
+                                           wl_fixed_t dy_unaccel)
+{
+    struct wayland *wayland = data;
+    HWND focused_hwnd = wayland->pointer.focused_surface ?
+                        wayland->pointer.focused_surface->hwnd : 0;
+    int wine_dx, wine_dy;
+    INPUT input = {0};
+
+    if (!focused_hwnd)
+        return;
+
+    wayland_surface_coords_to_wine(wayland->pointer.focused_surface,
+                                   wl_fixed_to_int(dx), wl_fixed_to_int(dy),
+                                   &wine_dx, &wine_dy);
+
+    TRACE("surface=%p hwnd=%p wayland_dxdy=%d,%d wine_dxdy=%d,%d\n",
+          wayland->pointer.focused_surface, focused_hwnd,
+          wl_fixed_to_int(dx), wl_fixed_to_int(dy), wine_dx, wine_dy);
+
+    input.type           = INPUT_MOUSE;
+    input.mi.dx          = wine_dx;
+    input.mi.dy          = wine_dy;
+    input.mi.dwFlags     = MOUSEEVENTF_MOVE;
+
+    wayland->last_dispatch_mask |= QS_MOUSEMOVE;
+    wayland->last_event_type = INPUT_MOUSE;
+
+    __wine_send_input(focused_hwnd, &input, NULL);
+}
+
+static const struct zwp_relative_pointer_v1_listener zwp_relative_pointer_v1_listener = {
+    relative_pointer_handle_motion,
+};
+
 void wayland_pointer_init(struct wayland_pointer *pointer, struct wayland *wayland,
                           struct wl_pointer *wl_pointer)
 {
@@ -250,10 +297,14 @@ void wayland_pointer_init(struct wayland_pointer *pointer, struct wayland *wayla
     {
         wayland->pointer.cursor_wp_viewport = NULL;
     }
+    pointer->zwp_relative_pointer_v1 = NULL;
 }
 
 void wayland_pointer_deinit(struct wayland_pointer *pointer)
 {
+    if (pointer->zwp_relative_pointer_v1)
+        zwp_relative_pointer_v1_destroy(pointer->zwp_relative_pointer_v1);
+
     if (pointer->wl_pointer)
         wl_pointer_destroy(pointer->wl_pointer);
 
@@ -267,4 +318,33 @@ void wayland_pointer_deinit(struct wayland_pointer *pointer)
         wayland_cursor_destroy(pointer->cursor);
 
     memset(pointer, 0, sizeof(*pointer));
+}
+
+/**********************************************************************
+ *          wayland_pointer_set_relative
+ *
+ * Set whether the pointer emits relative (if able) or absolute motion events.
+ * The default is to emit absolute motion events.
+ */
+void wayland_pointer_set_relative(struct wayland_pointer *pointer, BOOL relative)
+{
+    if (!pointer->wayland->zwp_relative_pointer_manager_v1)
+        return;
+
+    if (!pointer->zwp_relative_pointer_v1 && relative)
+    {
+        pointer->zwp_relative_pointer_v1 =
+            zwp_relative_pointer_manager_v1_get_relative_pointer(
+                pointer->wayland->zwp_relative_pointer_manager_v1,
+                pointer->wl_pointer);
+
+        zwp_relative_pointer_v1_add_listener(pointer->zwp_relative_pointer_v1,
+                                             &zwp_relative_pointer_v1_listener,
+                                             pointer->wayland);
+    }
+    else if (pointer->zwp_relative_pointer_v1 && !relative)
+    {
+        zwp_relative_pointer_v1_destroy(pointer->zwp_relative_pointer_v1);
+        pointer->zwp_relative_pointer_v1 = NULL;
+    }
 }

@@ -34,6 +34,7 @@
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-compose.h>
 #include "linux-dmabuf-unstable-v1-client-protocol.h"
+#include "relative-pointer-unstable-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
@@ -159,6 +160,7 @@ struct wayland_pointer
     uint32_t enter_serial;
     struct wayland_cursor *cursor;
     HCURSOR hcursor;
+    struct zwp_relative_pointer_v1 *zwp_relative_pointer_v1;
 };
 
 struct wayland_dmabuf_format_info
@@ -230,6 +232,7 @@ struct wayland
     struct wl_shm *wl_shm;
     struct wl_seat *wl_seat;
     struct wp_viewporter *wp_viewporter;
+    struct zwp_relative_pointer_manager_v1 *zwp_relative_pointer_manager_v1;
     struct zxdg_output_manager_v1 *zxdg_output_manager_v1;
     uint32_t next_fallback_output_id;
     struct wl_list output_list;
@@ -605,6 +608,7 @@ void wayland_keyboard_update_layout(struct wayland_keyboard *keyboard) DECLSPEC_
 void wayland_pointer_init(struct wayland_pointer *pointer, struct wayland *wayland,
                           struct wl_pointer *wl_pointer) DECLSPEC_HIDDEN;
 void wayland_pointer_deinit(struct wayland_pointer *pointer) DECLSPEC_HIDDEN;
+void wayland_pointer_set_relative(struct wayland_pointer *pointer, BOOL relative) DECLSPEC_HIDDEN;
 void wayland_cursor_destroy(struct wayland_cursor *wayland_cursor) DECLSPEC_HIDDEN;
 void wayland_cursor_theme_init(struct wayland *wayland) DECLSPEC_HIDDEN;
 void wayland_pointer_update_cursor_from_win32(struct wayland_pointer *pointer,

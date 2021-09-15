@@ -532,6 +532,7 @@ void wayland_surface_leave_output(struct wayland_surface *surface,
 void wayland_surface_set_wine_output(struct wayland_surface *surface,
                                      struct wayland_output *output) DECLSPEC_HIDDEN;
 double wayland_surface_get_buffer_scale(struct wayland_surface *surface) DECLSPEC_HIDDEN;
+void wayland_surface_set_title(struct wayland_surface *surface, LPCWSTR title) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Wayland native buffer
@@ -791,6 +792,8 @@ void WAYLAND_SetLayeredWindowAttributes(HWND hwnd, COLORREF key, BYTE alpha, DWO
 void WAYLAND_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw) DECLSPEC_HIDDEN;
 void WAYLAND_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style) DECLSPEC_HIDDEN;
 UINT WAYLAND_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp) DECLSPEC_HIDDEN;
+void WAYLAND_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style) DECLSPEC_HIDDEN;
+void WAYLAND_SetWindowText(HWND hwnd, LPCWSTR text) DECLSPEC_HIDDEN;
 LRESULT WAYLAND_SysCommand(HWND hwnd, WPARAM wparam, LPARAM lparam) DECLSPEC_HIDDEN;
 INT WAYLAND_ToUnicodeEx(UINT virt, UINT scan, const BYTE *state,
                         LPWSTR buf, int nchars, UINT flags, HKL hkl) DECLSPEC_HIDDEN;

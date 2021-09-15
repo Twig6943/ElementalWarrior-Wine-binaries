@@ -484,6 +484,9 @@ void wayland_surface_for_hwnd_unlock(struct wayland_surface *surface) DECLSPEC_H
 void wayland_surface_coords_to_screen(struct wayland_surface *surface,
                                       double wayland_x, double wayland_y,
                                       int *screen_x, int *screen_y) DECLSPEC_HIDDEN;
+void wayland_surface_coords_from_screen(struct wayland_surface *surface,
+                                        int screen_x, int screen_y,
+                                        double *wayland_x, double *wayland_y) DECLSPEC_HIDDEN;
 void wayland_surface_coords_from_wine(struct wayland_surface *surface,
                                       int wine_x, int wine_y,
                                       double *wayland_x, double *wayland_y) DECLSPEC_HIDDEN;

@@ -994,6 +994,34 @@ void wayland_surface_coords_to_screen(struct wayland_surface *surface,
 }
 
 /**********************************************************************
+ *          wayland_surface_coords_from_screen
+ *
+ * Converts the Windows screen coordinates to surface-local coordinates.
+ */
+void wayland_surface_coords_from_screen(struct wayland_surface *surface,
+                                        int screen_x, int screen_y,
+                                        double *wayland_x, double *wayland_y)
+{
+    int wine_x, wine_y;
+    RECT window_rect = {0};
+
+    /* Screen to window */
+    NtUserGetWindowRect(surface->hwnd, &window_rect);
+    OffsetRect(&window_rect, surface->offset_x, surface->offset_y);
+
+    wine_x = screen_x - window_rect.left;
+    wine_y = screen_y - window_rect.top;
+
+    /* Window to wayland surface */
+    wayland_surface_coords_from_wine(surface, wine_x, wine_y,
+                                     wayland_x, wayland_y);
+
+    TRACE("hwnd=%p screen=%d,%d rect=%s => wayland=%.2f,%.2f\n",
+          surface->hwnd, screen_x, screen_y, wine_dbgstr_rect(&window_rect),
+          *wayland_x, *wayland_y);
+}
+
+/**********************************************************************
  *          wayland_surface_coords_from_wine
  *
  * Converts the window-local wine coordinates to wayland surface-local coordinates.

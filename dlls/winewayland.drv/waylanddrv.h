@@ -34,6 +34,7 @@
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-compose.h>
 #include "linux-dmabuf-unstable-v1-client-protocol.h"
+#include "pointer-constraints-unstable-v1-client-protocol.h"
 #include "relative-pointer-unstable-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
@@ -73,6 +74,7 @@ enum wayland_window_message
     WM_WAYLAND_REAPPLY_CURSOR,
     WM_WAYLAND_WINDOW_SURFACE_FLUSH,
     WM_WAYLAND_REMOTE_SURFACE,
+    WM_WAYLAND_POINTER_CONSTRAINT_UPDATE,
 };
 
 enum wayland_surface_role
@@ -107,6 +109,13 @@ enum wayland_remote_buffer_commit
     WAYLAND_REMOTE_BUFFER_COMMIT_NORMAL,
     WAYLAND_REMOTE_BUFFER_COMMIT_THROTTLED,
     WAYLAND_REMOTE_BUFFER_COMMIT_DETACHED,
+};
+
+enum wayland_pointer_constraint
+{
+    WAYLAND_POINTER_CONSTRAINT_RETAIN_CLIP,
+    WAYLAND_POINTER_CONSTRAINT_SYSTEM_CLIP,
+    WAYLAND_POINTER_CONSTRAINT_UNSET_CLIP,
 };
 
 /**********************************************************************
@@ -232,6 +241,7 @@ struct wayland
     struct wl_shm *wl_shm;
     struct wl_seat *wl_seat;
     struct wp_viewporter *wp_viewporter;
+    struct zwp_pointer_constraints_v1 *zwp_pointer_constraints_v1;
     struct zwp_relative_pointer_manager_v1 *zwp_relative_pointer_manager_v1;
     struct zxdg_output_manager_v1 *zxdg_output_manager_v1;
     uint32_t next_fallback_output_id;
@@ -247,6 +257,7 @@ struct wayland
     uint32_t last_button_serial;
     int last_event_type;
     int event_notification_pipe[2];
+    RECT cursor_clip;
 };
 
 struct wayland_output_mode
@@ -310,6 +321,8 @@ struct wayland_surface
     struct wayland_surface *parent;
     struct wayland_surface *glvk;
     struct wayland_dmabuf_surface_feedback *surface_feedback;
+    struct zwp_confined_pointer_v1 *zwp_confined_pointer_v1;
+    struct zwp_locked_pointer_v1 *zwp_locked_pointer_v1;
     /* The offset of this surface relative to its owning win32 window */
     int offset_x, offset_y;
     HWND hwnd;
@@ -503,6 +516,7 @@ void wayland_surface_ensure_mapped(struct wayland_surface *surface) DECLSPEC_HID
 void wayland_surface_schedule_wm_configure(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 struct wayland_surface *wayland_surface_ref(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 void wayland_surface_unref(struct wayland_surface *surface) DECLSPEC_HIDDEN;
+void wayland_surface_update_pointer_constraint(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 void wayland_surface_leave_output(struct wayland_surface *surface,
                                   struct wayland_output *output) DECLSPEC_HIDDEN;
 void wayland_surface_set_wine_output(struct wayland_surface *surface,
@@ -751,6 +765,7 @@ static inline HWND get_focus(void)
 
 LONG WAYLAND_ChangeDisplaySettings(LPDEVMODEW displays, LPCWSTR primary_name,
                                    HWND hwnd, DWORD flags, LPVOID lpvoid) DECLSPEC_HIDDEN;
+BOOL WAYLAND_ClipCursor(const RECT *clip) DECLSPEC_HIDDEN;
 BOOL WAYLAND_CreateWindow(HWND hwnd) DECLSPEC_HIDDEN;
 LRESULT WAYLAND_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) DECLSPEC_HIDDEN;
 void WAYLAND_DestroyWindow(HWND hwnd) DECLSPEC_HIDDEN;

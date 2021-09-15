@@ -37,6 +37,7 @@ WAYLAND_PROTOCOL_SRCS = \
 	$(WAYLAND_PROTOCOLS_DATADIR)/stable/viewporter/viewporter.xml \
 	$(WAYLAND_PROTOCOLS_DATADIR)/stable/xdg-shell/xdg-shell.xml \
 	$(WAYLAND_PROTOCOLS_DATADIR)/unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml \
+	$(WAYLAND_PROTOCOLS_DATADIR)/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml \
 	$(WAYLAND_PROTOCOLS_DATADIR)/unstable/relative-pointer/relative-pointer-unstable-v1.xml \
 	$(WAYLAND_PROTOCOLS_DATADIR)/unstable/xdg-output/xdg-output-unstable-v1.xml \
 

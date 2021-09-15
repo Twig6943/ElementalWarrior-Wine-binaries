@@ -687,6 +687,7 @@ static HWND wayland_get_thread_cursor_hwnd(void)
 void wayland_reapply_thread_cursor(void)
 {
     HWND cursor_hwnd = wayland_get_thread_cursor_hwnd();
+    RECT clip;
 
     TRACE("cursor_hwnd=%p\n", cursor_hwnd);
 
@@ -700,6 +701,9 @@ void wayland_reapply_thread_cursor(void)
      * visibility state (i.e., ShowCursor()), which is difficult to access
      * otherwise, is taken into account. */
     NtUserSetCursor(NtUserGetCursor());
+    /* Reapply the current cursor clip, so that the wayland pointer
+     * constraint is updated for the newly entered window. */
+    NtUserClipCursor(NtUserGetClipCursor(&clip) ? &clip : NULL);
 }
 
 /***********************************************************************
@@ -718,5 +722,26 @@ void WAYLAND_SetCursor(HCURSOR hcursor)
     {
         send_message(cursor_hwnd, WM_WAYLAND_SET_CURSOR, GetCurrentThreadId(),
                      (LPARAM)hcursor);
+        /* Cursor visibility affects pointer confinement mode. */
+        send_message(cursor_hwnd, WM_WAYLAND_POINTER_CONSTRAINT_UPDATE,
+                     WAYLAND_POINTER_CONSTRAINT_RETAIN_CLIP, 0);
     }
+}
+
+/***********************************************************************
+ *           WAYLAND_ClipCursor
+ */
+BOOL WAYLAND_ClipCursor(const RECT *clip)
+{
+    HWND cursor_hwnd = wayland_get_thread_cursor_hwnd();
+    WPARAM constrain;
+
+    if (!cursor_hwnd) return TRUE;
+
+    constrain = clip ? WAYLAND_POINTER_CONSTRAINT_SYSTEM_CLIP :
+                       WAYLAND_POINTER_CONSTRAINT_UNSET_CLIP;
+
+    send_message(cursor_hwnd, WM_WAYLAND_POINTER_CONSTRAINT_UPDATE, constrain, 0);
+
+    return TRUE;
 }

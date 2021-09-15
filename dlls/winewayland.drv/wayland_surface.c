@@ -703,6 +703,18 @@ void wayland_surface_destroy(struct wayland_surface *surface)
     if (surface->surface_feedback)
         wayland_dmabuf_surface_feedback_destroy(surface->surface_feedback);
 
+    if (surface->zwp_locked_pointer_v1)
+    {
+        zwp_locked_pointer_v1_destroy(surface->zwp_locked_pointer_v1);
+        surface->zwp_locked_pointer_v1 = NULL;
+    }
+
+    if (surface->zwp_confined_pointer_v1)
+    {
+        zwp_confined_pointer_v1_destroy(surface->zwp_confined_pointer_v1);
+        surface->zwp_confined_pointer_v1 = NULL;
+    }
+
     if (surface->wp_viewport)
     {
         wp_viewport_destroy(surface->wp_viewport);
@@ -1252,6 +1264,186 @@ void wayland_surface_unref(struct wayland_surface *surface)
 
     if (ref == 0)
         wayland_surface_destroy(surface);
+}
+
+/**********************************************************************
+ *          wayland_surface_update_pointer_constraint
+ *
+ * Update the pointer constraint on the surface. Constraint mode depends
+ * on the current Windows cursor clip and cursor visibility.
+ */
+void wayland_surface_update_pointer_constraint(struct wayland_surface *surface)
+{
+    struct wayland *wayland = surface->wayland;
+    struct wayland_surface *glvk;
+    struct wl_region *region;
+    RECT vscreen_rect;
+    RECT clip_rect = wayland->cursor_clip;
+    RECT client_rect = {0};
+    RECT client_clip_rect;
+    BOOL needs_lock = FALSE;
+    BOOL needs_confine = FALSE;
+
+    if (!wayland->zwp_pointer_constraints_v1 || !wayland->pointer.wl_pointer)
+        return;
+
+    wayland_get_client_rect_in_screen_coords(surface->hwnd, &client_rect);
+
+    vscreen_rect.top = NtUserGetSystemMetrics(SM_YVIRTUALSCREEN);
+    vscreen_rect.left = NtUserGetSystemMetrics(SM_XVIRTUALSCREEN);
+    vscreen_rect.bottom = vscreen_rect.top + NtUserGetSystemMetrics(SM_CYVIRTUALSCREEN);
+    vscreen_rect.right = vscreen_rect.left + NtUserGetSystemMetrics(SM_CXVIRTUALSCREEN);
+
+    /* Get the effective clip area, if any. */
+    intersect_rect(&clip_rect, &clip_rect, &vscreen_rect);
+    intersect_rect(&client_clip_rect, &clip_rect, &client_rect);
+
+    TRACE("wayland=%p surface=%p (glvk=%p) clip_rect=%s client_clip_rect=%s "
+          "client=%s vscreen=%s hcursor=%p\n",
+          wayland, surface, surface->glvk,
+          wine_dbgstr_rect(&clip_rect), wine_dbgstr_rect(&client_clip_rect),
+          wine_dbgstr_rect(&client_rect),
+          wine_dbgstr_rect(&vscreen_rect),
+          wayland->pointer.hcursor);
+
+    /* If there is a GL/VK subsurface use that to apply the pointer constaints,
+     * since it's covering the whole client area. */
+    glvk = wayland_surface_ref_glvk(surface);
+    if (glvk)
+    {
+        if (surface->zwp_locked_pointer_v1)
+        {
+            zwp_locked_pointer_v1_destroy(surface->zwp_locked_pointer_v1);
+            surface->zwp_locked_pointer_v1 = NULL;
+        }
+        if (surface->zwp_confined_pointer_v1)
+        {
+            zwp_confined_pointer_v1_destroy(surface->zwp_confined_pointer_v1);
+            surface->zwp_confined_pointer_v1 = NULL;
+        }
+        surface = glvk;
+    }
+
+    /* Only handle confinement or locking if the cursor is actually clipped
+     * within this window, or if the clip rect is empty. */
+    if (!IsRectEmpty(&client_clip_rect) || IsRectEmpty(&clip_rect))
+    {
+        /* Having an effective clip (i.e., clip is not the whole screen) is
+         * a prerequisite for locking the pointer. If the client rect is
+         * the whole screen (i.e., application is fullscreen), we can't
+         * differentiate between an explicit fullscreen clip and no effective
+         * clip (i.e., clip is the whole screen), so also consider locking. */
+        BOOL lock_clip = !EqualRect(&clip_rect, &vscreen_rect) ||
+                         EqualRect(&client_rect, &vscreen_rect);
+        /* To consider confining the pointer we must have an effective clip,
+         * otherwise confininement makes no difference. */
+        BOOL confine_clip = !EqualRect(&clip_rect, &vscreen_rect);
+
+        /* If the cursor is not visible, and we have an lock clip, lock.
+         * Otherwise if the cursor is visible check if we need to confine. */
+        if (!wayland->pointer.hcursor && lock_clip)
+        {
+            needs_lock = TRUE;
+        }
+        else if (wayland->pointer.hcursor && confine_clip)
+        {
+            needs_confine = TRUE;
+        }
+    }
+
+    /* Destroy unneeded interface objects. */
+    if (!needs_lock && surface->zwp_locked_pointer_v1)
+    {
+        POINT cursor_pos;
+
+        if (NtUserGetCursorPos(&cursor_pos) && PtInRect(&client_rect, cursor_pos))
+        {
+            double wayland_x, wayland_y;
+            wayland_surface_coords_from_screen(surface,
+                                               cursor_pos.x, cursor_pos.y,
+                                               &wayland_x, &wayland_y);
+
+            zwp_locked_pointer_v1_set_cursor_position_hint(
+                    surface->zwp_locked_pointer_v1,
+                    wl_fixed_from_double(wayland_x),
+                    wl_fixed_from_double(wayland_y));
+
+            wl_surface_commit(surface->wl_surface);
+        }
+
+        zwp_locked_pointer_v1_destroy(surface->zwp_locked_pointer_v1);
+        surface->zwp_locked_pointer_v1 = NULL;
+    }
+
+    if (!needs_confine && surface->zwp_confined_pointer_v1)
+    {
+        zwp_confined_pointer_v1_destroy(surface->zwp_confined_pointer_v1);
+        surface->zwp_confined_pointer_v1 = NULL;
+    }
+
+    /* Set up (or update) pointer confinement or lock. */
+    if (needs_confine)
+    {
+        double top, left, bottom, right;
+
+        wayland_surface_coords_from_screen(surface,
+                                           client_clip_rect.left,
+                                           client_clip_rect.top,
+                                           &left, &top);
+        wayland_surface_coords_from_screen(surface,
+                                           client_clip_rect.right,
+                                           client_clip_rect.bottom,
+                                           &right, &bottom);
+
+        region = wl_compositor_create_region(wayland->wl_compositor);
+        wl_region_add(region, round(left), round(top),
+                      round(right - left), round(bottom - top));
+
+        if (!surface->zwp_confined_pointer_v1)
+        {
+            surface->zwp_confined_pointer_v1 =
+                zwp_pointer_constraints_v1_confine_pointer(
+                    wayland->zwp_pointer_constraints_v1,
+                    surface->wl_surface,
+                    wayland->pointer.wl_pointer,
+                    region,
+                    ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+        }
+        else
+        {
+            zwp_confined_pointer_v1_set_region(surface->zwp_confined_pointer_v1,
+                                               region);
+        }
+
+        wl_region_destroy(region);
+    }
+    else if (needs_lock)
+    {
+        if (!surface->zwp_locked_pointer_v1)
+        {
+            surface->zwp_locked_pointer_v1 =
+                zwp_pointer_constraints_v1_lock_pointer(
+                    wayland->zwp_pointer_constraints_v1,
+                    surface->wl_surface,
+                    wayland->pointer.wl_pointer,
+                    NULL,
+                    ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+        }
+        else
+        {
+            zwp_locked_pointer_v1_set_region(surface->zwp_locked_pointer_v1,
+                                             NULL);
+        }
+    }
+
+    if (wayland->pointer.focused_surface == surface)
+        wayland_pointer_set_relative(&wayland->pointer, needs_lock);
+
+    if (needs_confine || needs_lock)
+        wl_surface_commit(surface->wl_surface);
+
+    if (glvk)
+        wayland_surface_unref_glvk(glvk->parent);
 }
 
 static void wayland_surface_tree_set_main_output(struct wayland_surface *surface,

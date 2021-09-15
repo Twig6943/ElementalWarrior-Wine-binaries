@@ -34,6 +34,8 @@
 #include <assert.h>
 #include <stdlib.h>
 
+#include <limits.h>
+
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
 /* private window data */
@@ -920,6 +922,8 @@ static void wayland_win_data_update_wayland_surface_state(struct wayland_win_dat
     wayland_surface_reconfigure_apply(wsurface);
 
     wayland_mutex_unlock(&wsurface->mutex);
+
+    wayland_surface_update_pointer_constraint(wsurface);
 }
 
 static struct wayland_win_data *update_wayland_state(struct wayland_win_data *data)
@@ -1729,6 +1733,25 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             struct wayland_surface *wayland_surface = wayland_surface_for_hwnd_lock(hwnd);
             if (wayland_surface)
                 wayland_remote_surface_handle_message(wayland_surface, wp, lp);
+            wayland_surface_for_hwnd_unlock(wayland_surface);
+        }
+        break;
+    case WM_WAYLAND_POINTER_CONSTRAINT_UPDATE:
+        {
+            struct wayland_surface *wayland_surface = wayland_surface_for_hwnd_lock(hwnd);
+            if (wayland_surface)
+            {
+                if (wp == WAYLAND_POINTER_CONSTRAINT_SYSTEM_CLIP)
+                {
+                    NtUserGetClipCursor(&wayland_surface->wayland->cursor_clip);
+                }
+                else if (wp == WAYLAND_POINTER_CONSTRAINT_UNSET_CLIP)
+                {
+                    SetRect(&wayland_surface->wayland->cursor_clip,
+                            INT_MIN, INT_MIN, INT_MAX, INT_MAX);
+                }
+                wayland_surface_update_pointer_constraint(wayland_surface);
+            }
             wayland_surface_for_hwnd_unlock(wayland_surface);
         }
         break;

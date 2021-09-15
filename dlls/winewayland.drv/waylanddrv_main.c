@@ -123,6 +123,7 @@ const struct user_driver_funcs waylanddrv_funcs =
     .dc_funcs.priority = GDI_PRIORITY_GRAPHICS_DRV,
 
     .pChangeDisplaySettings = WAYLAND_ChangeDisplaySettings,
+    .pClipCursor = WAYLAND_ClipCursor,
     .pCreateWindow = WAYLAND_CreateWindow,
     .pDesktopWindowProc = WAYLAND_DesktopWindowProc,
     .pDestroyWindow = WAYLAND_DestroyWindow,

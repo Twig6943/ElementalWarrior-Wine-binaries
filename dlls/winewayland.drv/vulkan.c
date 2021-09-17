@@ -53,6 +53,7 @@ typedef struct VkWaylandSurfaceCreateInfoKHR
 } VkWaylandSurfaceCreateInfoKHR;
 
 static VkResult (*pvkCreateInstance)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *, VkInstance *);
+static VkResult (*pvkCreateSwapchainKHR)(VkDevice, const VkSwapchainCreateInfoKHR *, const VkAllocationCallbacks *, VkSwapchainKHR *);
 static VkResult (*pvkCreateWaylandSurfaceKHR)(VkInstance, const VkWaylandSurfaceCreateInfoKHR *, const VkAllocationCallbacks *, VkSurfaceKHR *);
 static void (*pvkDestroyInstance)(VkInstance, const VkAllocationCallbacks *);
 static void (*pvkDestroySurfaceKHR)(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
@@ -65,6 +66,7 @@ static struct wayland_mutex wine_vk_object_mutex =
 };
 
 static struct wl_list wine_vk_surface_list = { &wine_vk_surface_list, &wine_vk_surface_list };
+static struct wl_list wine_vk_swapchain_list = { &wine_vk_swapchain_list, &wine_vk_swapchain_list };
 
 struct wine_vk_surface
 {
@@ -72,6 +74,14 @@ struct wine_vk_surface
     HWND hwnd;
     struct wayland_surface *wayland_surface;
     VkSurfaceKHR native_vk_surface;
+};
+
+struct wine_vk_swapchain
+{
+    struct wl_list link;
+    HWND hwnd;
+    struct wayland_surface *wayland_surface;
+    VkSwapchainKHR native_vk_swapchain;
 };
 
 static inline void wine_vk_list_add(struct wl_list *list, struct wl_list *link)
@@ -112,6 +122,16 @@ static struct wine_vk_surface *wine_vk_surface_from_handle(VkSurfaceKHR handle)
 out:
     wayland_mutex_unlock(&wine_vk_object_mutex);
     return surf;
+}
+
+static void wine_vk_swapchain_destroy(struct wine_vk_swapchain *wine_vk_swapchain)
+{
+    wine_vk_list_remove(&wine_vk_swapchain->link);
+
+    if (wine_vk_swapchain->wayland_surface)
+        wayland_surface_unref_glvk(wine_vk_swapchain->wayland_surface);
+
+    free(wine_vk_swapchain);
 }
 
 /* Helper function for converting between win32 and Wayland compatible VkInstanceCreateInfo.
@@ -158,6 +178,11 @@ static VkResult wine_vk_instance_convert_create_info(const VkInstanceCreateInfo 
     return VK_SUCCESS;
 }
 
+#define RETURN_VK_ERROR_SURFACE_LOST_KHR { \
+    TRACE("VK_ERROR_SURFACE_LOST_KHR\n"); \
+    return VK_ERROR_SURFACE_LOST_KHR; \
+}
+
 static VkResult wayland_vkCreateInstance(const VkInstanceCreateInfo *create_info,
                                          const VkAllocationCallbacks *allocator,
                                          VkInstance *instance)
@@ -183,6 +208,58 @@ static VkResult wayland_vkCreateInstance(const VkInstanceCreateInfo *create_info
     res = pvkCreateInstance(&create_info_host, NULL /* allocator */, instance);
 
     free((void *)create_info_host.ppEnabledExtensionNames);
+    return res;
+}
+
+static VkResult wayland_vkCreateSwapchainKHR(VkDevice device,
+                                             const VkSwapchainCreateInfoKHR *create_info,
+                                             const VkAllocationCallbacks *allocator,
+                                             VkSwapchainKHR *swapchain)
+{
+    VkResult res;
+    struct wine_vk_surface *wine_vk_surface;
+    struct wine_vk_swapchain *wine_vk_swapchain;
+    VkSwapchainCreateInfoKHR info = *create_info;
+
+    TRACE("%p %p %p %p\n", device, create_info, allocator, swapchain);
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    /* Wayland can't deal with 0x0 swapchains, use the minimum 1x1. */
+    if (info.imageExtent.width == 0)
+        info.imageExtent.width = 1;
+    if (info.imageExtent.height == 0)
+        info.imageExtent.height = 1;
+
+    wine_vk_surface = wine_vk_surface_from_handle(info.surface);
+    if (!wine_vk_surface)
+        RETURN_VK_ERROR_SURFACE_LOST_KHR;
+
+    wine_vk_swapchain = calloc(1, sizeof(*wine_vk_swapchain));
+    if (!wine_vk_swapchain)
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+    wl_list_init(&wine_vk_swapchain->link);
+
+    res = pvkCreateSwapchainKHR(device, &info, NULL /* allocator */, swapchain);
+    if (res != VK_SUCCESS)
+        goto err;
+
+    wine_vk_swapchain->hwnd = wine_vk_surface->hwnd;
+    if (wine_vk_surface->wayland_surface)
+    {
+        wayland_surface_create_or_ref_glvk(wine_vk_surface->wayland_surface);
+        wine_vk_swapchain->wayland_surface = wine_vk_surface->wayland_surface;
+    }
+    wine_vk_swapchain->native_vk_swapchain = *swapchain;
+
+    wine_vk_list_add(&wine_vk_swapchain_list, &wine_vk_swapchain->link);
+
+    return res;
+
+err:
+    wine_vk_swapchain_destroy(wine_vk_swapchain);
     return res;
 }
 
@@ -293,6 +370,7 @@ static void wine_vk_init(void)
 
 #define LOAD_FUNCPTR(f) if (!(p##f = dlsym(vulkan_handle, #f))) goto fail
     LOAD_FUNCPTR(vkCreateInstance);
+    LOAD_FUNCPTR(vkCreateSwapchainKHR);
     LOAD_FUNCPTR(vkCreateWaylandSurfaceKHR);
     LOAD_FUNCPTR(vkDestroyInstance);
     LOAD_FUNCPTR(vkDestroySurfaceKHR);
@@ -308,6 +386,7 @@ fail:
 static const struct vulkan_funcs vulkan_funcs =
 {
     .p_vkCreateInstance = wayland_vkCreateInstance,
+    .p_vkCreateSwapchainKHR = wayland_vkCreateSwapchainKHR,
     .p_vkCreateWin32SurfaceKHR = wayland_vkCreateWin32SurfaceKHR,
     .p_vkDestroyInstance = wayland_vkDestroyInstance,
     .p_vkDestroySurfaceKHR = wayland_vkDestroySurfaceKHR,

@@ -28,6 +28,8 @@
 
 #include "wine/debug.h"
 
+#include "ntuser.h"
+
 #define VK_NO_PROTOTYPES
 #define WINE_VK_HOST
 
@@ -84,6 +86,7 @@ struct wine_vk_swapchain
     HWND hwnd;
     struct wayland_surface *wayland_surface;
     VkSwapchainKHR native_vk_swapchain;
+    VkExtent2D extent;
 };
 
 static inline void wine_vk_list_add(struct wl_list *list, struct wl_list *link)
@@ -271,6 +274,7 @@ static VkResult wayland_vkCreateSwapchainKHR(VkDevice device,
         wine_vk_swapchain->wayland_surface = wine_vk_surface->wayland_surface;
     }
     wine_vk_swapchain->native_vk_swapchain = *swapchain;
+    wine_vk_swapchain->extent = info.imageExtent;
 
     wine_vk_list_add(&wine_vk_swapchain_list, &wine_vk_swapchain->link);
 
@@ -410,17 +414,27 @@ static VkResult validate_present_info(const VkPresentInfoKHR *present_info)
         BOOL drawing_allowed =
             (wine_vk_swapchain && wine_vk_swapchain->wayland_surface) ?
             wine_vk_swapchain->wayland_surface->drawing_allowed : TRUE;
+        RECT client;
 
-        TRACE("swapchain[%d] vk=0x%s wine=%p wayland_surface=%p "
+        TRACE("swapchain[%d] vk=0x%s wine=%p extent=%dx%d wayland_surface=%p "
                "drawing_allowed=%d\n",
                i, wine_dbgstr_longlong(vk_swapchain), wine_vk_swapchain,
+               wine_vk_swapchain ? wine_vk_swapchain->extent.width : 0,
+               wine_vk_swapchain ? wine_vk_swapchain->extent.height : 0,
                wine_vk_swapchain ? wine_vk_swapchain->wayland_surface : NULL,
                drawing_allowed);
 
-        if (!wine_vk_swapchain)
+        if (!wine_vk_swapchain ||
+            !NtUserGetClientRect(wine_vk_swapchain->hwnd, &client))
+        {
             res = VK_ERROR_SURFACE_LOST_KHR;
-        else if (!drawing_allowed)
+        }
+        else if (client.right != wine_vk_swapchain->extent.width ||
+                 client.bottom != wine_vk_swapchain->extent.height ||
+                 !drawing_allowed)
+        {
             if (res == VK_SUCCESS) res = VK_ERROR_OUT_OF_DATE_KHR;
+        }
 
         /* Since Vulkan content is presented on a Wayland subsurface, we need
          * to ensure the parent Wayland surface is mapped for the Vulkan

@@ -58,6 +58,7 @@ static VkResult (*pvkCreateWaylandSurfaceKHR)(VkInstance, const VkWaylandSurface
 static void (*pvkDestroyInstance)(VkInstance, const VkAllocationCallbacks *);
 static void (*pvkDestroySurfaceKHR)(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
 static void (*pvkDestroySwapchainKHR)(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks *);
+static VkResult (*pvkQueuePresentKHR)(VkQueue, const VkPresentInfoKHR *);
 
 static void *vulkan_handle;
 
@@ -396,6 +397,89 @@ static void wayland_vkDestroySwapchainKHR(VkDevice device,
     }
 }
 
+static VkResult validate_present_info(const VkPresentInfoKHR *present_info)
+{
+    uint32_t i;
+    VkResult res = VK_SUCCESS;
+
+    for (i = 0; i < present_info->swapchainCount; ++i)
+    {
+        const VkSwapchainKHR vk_swapchain = present_info->pSwapchains[i];
+        struct wine_vk_swapchain *wine_vk_swapchain =
+            wine_vk_swapchain_from_handle(vk_swapchain);
+        BOOL drawing_allowed =
+            (wine_vk_swapchain && wine_vk_swapchain->wayland_surface) ?
+            wine_vk_swapchain->wayland_surface->drawing_allowed : TRUE;
+
+        TRACE("swapchain[%d] vk=0x%s wine=%p wayland_surface=%p "
+               "drawing_allowed=%d\n",
+               i, wine_dbgstr_longlong(vk_swapchain), wine_vk_swapchain,
+               wine_vk_swapchain ? wine_vk_swapchain->wayland_surface : NULL,
+               drawing_allowed);
+
+        if (!wine_vk_swapchain)
+            res = VK_ERROR_SURFACE_LOST_KHR;
+        else if (!drawing_allowed)
+            if (res == VK_SUCCESS) res = VK_ERROR_OUT_OF_DATE_KHR;
+
+        /* Since Vulkan content is presented on a Wayland subsurface, we need
+         * to ensure the parent Wayland surface is mapped for the Vulkan
+         * content to be visible. */
+        if (wine_vk_swapchain->wayland_surface && drawing_allowed)
+            wayland_surface_ensure_mapped(wine_vk_swapchain->wayland_surface);
+    }
+
+    /* In case of error in any swapchain, we are not going to present at all,
+     * so mark all swapchains as failures. */
+    if (res != VK_SUCCESS && present_info->pResults)
+    {
+        for (i = 0; i < present_info->swapchainCount; ++i)
+            present_info->pResults[i] = res;
+    }
+
+    return res;
+}
+
+static void lock_swapchain_wayland_surfaces(const VkPresentInfoKHR *present_info,
+                                            BOOL lock)
+{
+    uint32_t i;
+
+    for (i = 0; i < present_info->swapchainCount; ++i)
+    {
+        const VkSwapchainKHR vk_swapchain = present_info->pSwapchains[i];
+        struct wine_vk_swapchain *wine_vk_swapchain =
+            wine_vk_swapchain_from_handle(vk_swapchain);
+
+        if (wine_vk_swapchain && wine_vk_swapchain->wayland_surface)
+        {
+            if (lock)
+                wayland_mutex_lock(&wine_vk_swapchain->wayland_surface->mutex);
+            else
+                wayland_mutex_unlock(&wine_vk_swapchain->wayland_surface->mutex);
+        }
+    }
+}
+
+static VkResult wayland_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *present_info)
+{
+    VkResult res;
+
+    TRACE("%p, %p\n", queue, present_info);
+
+    /* Lock the surfaces to ensure we don't present while reconfiguration is
+     * taking place, so we don't inadvertently commit an in-progress,
+     * incomplete configuration state. */
+    lock_swapchain_wayland_surfaces(present_info, TRUE);
+
+    if ((res = validate_present_info(present_info)) == VK_SUCCESS)
+        res = pvkQueuePresentKHR(queue, present_info);
+
+    lock_swapchain_wayland_surfaces(present_info, FALSE);
+
+    return res;
+}
+
 static void wine_vk_init(void)
 {
     if (!(vulkan_handle = dlopen(SONAME_LIBVULKAN, RTLD_NOW)))
@@ -411,6 +495,7 @@ static void wine_vk_init(void)
     LOAD_FUNCPTR(vkDestroyInstance);
     LOAD_FUNCPTR(vkDestroySurfaceKHR);
     LOAD_FUNCPTR(vkDestroySwapchainKHR);
+    LOAD_FUNCPTR(vkQueuePresentKHR);
 #undef LOAD_FUNCPTR
 
     return;
@@ -428,6 +513,7 @@ static const struct vulkan_funcs vulkan_funcs =
     .p_vkDestroyInstance = wayland_vkDestroyInstance,
     .p_vkDestroySurfaceKHR = wayland_vkDestroySurfaceKHR,
     .p_vkDestroySwapchainKHR = wayland_vkDestroySwapchainKHR,
+    .p_vkQueuePresentKHR = wayland_vkQueuePresentKHR,
 };
 
 /**********************************************************************

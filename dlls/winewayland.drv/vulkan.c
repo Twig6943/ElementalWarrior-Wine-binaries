@@ -78,6 +78,7 @@ struct wine_vk_surface
     HWND hwnd;
     struct wayland_surface *wayland_surface;
     VkSurfaceKHR native_vk_surface;
+    BOOL valid;
 };
 
 struct wine_vk_swapchain
@@ -87,6 +88,7 @@ struct wine_vk_swapchain
     struct wayland_surface *wayland_surface;
     VkSwapchainKHR native_vk_swapchain;
     VkExtent2D extent;
+    BOOL valid;
 };
 
 static inline void wine_vk_list_add(struct wl_list *list, struct wl_list *link)
@@ -254,7 +256,7 @@ static VkResult wayland_vkCreateSwapchainKHR(VkDevice device,
         info.imageExtent.height = 1;
 
     wine_vk_surface = wine_vk_surface_from_handle(info.surface);
-    if (!wine_vk_surface)
+    if (!wine_vk_surface || !__atomic_load_n(&wine_vk_surface->valid, __ATOMIC_SEQ_CST))
         RETURN_VK_ERROR_SURFACE_LOST_KHR;
 
     wine_vk_swapchain = calloc(1, sizeof(*wine_vk_swapchain));
@@ -275,6 +277,7 @@ static VkResult wayland_vkCreateSwapchainKHR(VkDevice device,
     }
     wine_vk_swapchain->native_vk_swapchain = *swapchain;
     wine_vk_swapchain->extent = info.imageExtent;
+    wine_vk_swapchain->valid = TRUE;
 
     wine_vk_list_add(&wine_vk_swapchain_list, &wine_vk_swapchain->link);
 
@@ -343,6 +346,7 @@ static VkResult wayland_vkCreateWin32SurfaceKHR(VkInstance instance,
 
     wine_vk_surface->hwnd = create_info->hwnd;
     wine_vk_surface->native_vk_surface = *vk_surface;
+    wine_vk_surface->valid = TRUE;
 
     wine_vk_list_add(&wine_vk_surface_list, &wine_vk_surface->link);
 
@@ -425,6 +429,7 @@ static VkResult validate_present_info(const VkPresentInfoKHR *present_info)
                drawing_allowed);
 
         if (!wine_vk_swapchain ||
+            !__atomic_load_n(&wine_vk_swapchain->valid, __ATOMIC_SEQ_CST) ||
             !NtUserGetClientRect(wine_vk_swapchain->hwnd, &client))
         {
             res = VK_ERROR_SURFACE_LOST_KHR;
@@ -550,12 +555,40 @@ const struct vulkan_funcs *WAYLAND_wine_get_vulkan_driver(UINT version)
     return NULL;
 }
 
+void wayland_invalidate_vulkan_objects(HWND hwnd)
+{
+    struct wine_vk_swapchain *swap;
+    struct wine_vk_surface *surf;
+
+    TRACE("hwnd=%p\n", hwnd);
+
+    wayland_mutex_lock(&wine_vk_object_mutex);
+
+    wl_list_for_each(swap, &wine_vk_swapchain_list, link)
+    {
+        if (swap->hwnd == hwnd)
+            __atomic_store_n(&swap->valid, FALSE, __ATOMIC_SEQ_CST);
+    }
+
+    wl_list_for_each(surf, &wine_vk_surface_list, link)
+    {
+        if (surf->hwnd == hwnd)
+            __atomic_store_n(&surf->valid, FALSE, __ATOMIC_SEQ_CST);
+    }
+
+    wayland_mutex_unlock(&wine_vk_object_mutex);
+}
+
 #else /* No vulkan */
 
 const struct vulkan_funcs *WAYLAND_wine_get_vulkan_driver(UINT version)
 {
     ERR("Wine was built without Vulkan support.\n");
     return NULL;
+}
+
+void wayland_invalidate_vulkan_objects(HWND hwnd)
+{
 }
 
 #endif /* SONAME_LIBVULKAN */

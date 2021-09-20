@@ -665,6 +665,12 @@ void wayland_update_front_buffer(HWND hwnd,
                                                      int width, int height)) DECLSPEC_HIDDEN;
 
 /**********************************************************************
+ *          Vulkan support
+ */
+
+void wayland_invalidate_vulkan_objects(HWND hwnd) DECLSPEC_HIDDEN;
+
+/**********************************************************************
  *          Registry helpers
  */
 

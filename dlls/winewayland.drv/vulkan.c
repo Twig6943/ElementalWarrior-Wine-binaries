@@ -62,6 +62,8 @@ static void (*pvkDestroySurfaceKHR)(VkInstance, VkSurfaceKHR, const VkAllocation
 static void (*pvkDestroySwapchainKHR)(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks *);
 static VkResult (*pvkEnumerateInstanceExtensionProperties)(const char *, uint32_t *, VkExtensionProperties *);
 static VkResult (*pvkGetDeviceGroupSurfacePresentModesKHR)(VkDevice, VkSurfaceKHR, VkDeviceGroupPresentModeFlagsKHR *);
+static void * (*pvkGetDeviceProcAddr)(VkDevice, const char *);
+static void * (*pvkGetInstanceProcAddr)(VkInstance, const char *);
 static VkResult (*pvkQueuePresentKHR)(VkQueue, const VkPresentInfoKHR *);
 
 static void *vulkan_handle;
@@ -73,6 +75,8 @@ static struct wayland_mutex wine_vk_object_mutex =
 
 static struct wl_list wine_vk_surface_list = { &wine_vk_surface_list, &wine_vk_surface_list };
 static struct wl_list wine_vk_swapchain_list = { &wine_vk_swapchain_list, &wine_vk_swapchain_list };
+
+static const struct vulkan_funcs vulkan_funcs;
 
 struct wine_vk_surface
 {
@@ -467,6 +471,30 @@ static VkResult wayland_vkGetDeviceGroupSurfacePresentModesKHR(VkDevice device,
     return pvkGetDeviceGroupSurfacePresentModesKHR(device, surface, flags);
 }
 
+static void *wayland_vkGetDeviceProcAddr(VkDevice device, const char *name)
+{
+    void *proc_addr;
+
+    TRACE("%p, %s\n", device, debugstr_a(name));
+
+    if ((proc_addr = get_vulkan_driver_device_proc_addr(&vulkan_funcs, name)))
+        return proc_addr;
+
+    return pvkGetDeviceProcAddr(device, name);
+}
+
+static void *wayland_vkGetInstanceProcAddr(VkInstance instance, const char *name)
+{
+    void *proc_addr;
+
+    TRACE("%p, %s\n", instance, debugstr_a(name));
+
+    if ((proc_addr = get_vulkan_driver_instance_proc_addr(&vulkan_funcs, instance, name)))
+        return proc_addr;
+
+    return pvkGetInstanceProcAddr(instance, name);
+}
+
 static VkResult validate_present_info(const VkPresentInfoKHR *present_info)
 {
     uint32_t i;
@@ -579,6 +607,8 @@ static void wine_vk_init(void)
     LOAD_FUNCPTR(vkDestroySwapchainKHR);
     LOAD_FUNCPTR(vkEnumerateInstanceExtensionProperties);
     LOAD_OPTIONAL_FUNCPTR(vkGetDeviceGroupSurfacePresentModesKHR);
+    LOAD_FUNCPTR(vkGetDeviceProcAddr);
+    LOAD_FUNCPTR(vkGetInstanceProcAddr);
     LOAD_FUNCPTR(vkQueuePresentKHR);
 #undef LOAD_FUNCPTR
 #undef LOAD_OPTIONAL_FUNCPTR
@@ -600,6 +630,8 @@ static const struct vulkan_funcs vulkan_funcs =
     .p_vkDestroySwapchainKHR = wayland_vkDestroySwapchainKHR,
     .p_vkEnumerateInstanceExtensionProperties = wayland_vkEnumerateInstanceExtensionProperties,
     .p_vkGetDeviceGroupSurfacePresentModesKHR = wayland_vkGetDeviceGroupSurfacePresentModesKHR,
+    .p_vkGetDeviceProcAddr = wayland_vkGetDeviceProcAddr,
+    .p_vkGetInstanceProcAddr = wayland_vkGetInstanceProcAddr,
     .p_vkQueuePresentKHR = wayland_vkQueuePresentKHR,
 };
 

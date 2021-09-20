@@ -61,6 +61,7 @@ static void (*pvkDestroyInstance)(VkInstance, const VkAllocationCallbacks *);
 static void (*pvkDestroySurfaceKHR)(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
 static void (*pvkDestroySwapchainKHR)(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks *);
 static VkResult (*pvkEnumerateInstanceExtensionProperties)(const char *, uint32_t *, VkExtensionProperties *);
+static VkResult (*pvkGetDeviceGroupSurfacePresentModesKHR)(VkDevice, VkSurfaceKHR, VkDeviceGroupPresentModeFlagsKHR *);
 static VkResult (*pvkQueuePresentKHR)(VkQueue, const VkPresentInfoKHR *);
 
 static void *vulkan_handle;
@@ -130,6 +131,12 @@ static struct wine_vk_surface *wine_vk_surface_from_handle(VkSurfaceKHR handle)
 out:
     wayland_mutex_unlock(&wine_vk_object_mutex);
     return surf;
+}
+
+static BOOL wine_vk_surface_handle_is_valid(VkSurfaceKHR handle)
+{
+    struct wine_vk_surface *wine_vk_surface = wine_vk_surface_from_handle(handle);
+    return wine_vk_surface && __atomic_load_n(&wine_vk_surface->valid, __ATOMIC_SEQ_CST);
 }
 
 static void wine_vk_swapchain_destroy(struct wine_vk_swapchain *wine_vk_swapchain)
@@ -448,6 +455,18 @@ static VkResult wayland_vkEnumerateInstanceExtensionProperties(const char *layer
     return res;
 }
 
+static VkResult wayland_vkGetDeviceGroupSurfacePresentModesKHR(VkDevice device,
+                                                               VkSurfaceKHR surface,
+                                                               VkDeviceGroupPresentModeFlagsKHR *flags)
+{
+    TRACE("%p, 0x%s, %p\n", device, wine_dbgstr_longlong(surface), flags);
+
+    if (!wine_vk_surface_handle_is_valid(surface))
+        RETURN_VK_ERROR_SURFACE_LOST_KHR;
+
+    return pvkGetDeviceGroupSurfacePresentModesKHR(device, surface, flags);
+}
+
 static VkResult validate_present_info(const VkPresentInfoKHR *present_info)
 {
     uint32_t i;
@@ -551,6 +570,7 @@ static void wine_vk_init(void)
     }
 
 #define LOAD_FUNCPTR(f) if (!(p##f = dlsym(vulkan_handle, #f))) goto fail
+#define LOAD_OPTIONAL_FUNCPTR(f) p##f = dlsym(vulkan_handle, #f)
     LOAD_FUNCPTR(vkCreateInstance);
     LOAD_FUNCPTR(vkCreateSwapchainKHR);
     LOAD_FUNCPTR(vkCreateWaylandSurfaceKHR);
@@ -558,8 +578,10 @@ static void wine_vk_init(void)
     LOAD_FUNCPTR(vkDestroySurfaceKHR);
     LOAD_FUNCPTR(vkDestroySwapchainKHR);
     LOAD_FUNCPTR(vkEnumerateInstanceExtensionProperties);
+    LOAD_OPTIONAL_FUNCPTR(vkGetDeviceGroupSurfacePresentModesKHR);
     LOAD_FUNCPTR(vkQueuePresentKHR);
 #undef LOAD_FUNCPTR
+#undef LOAD_OPTIONAL_FUNCPTR
 
     return;
 
@@ -577,6 +599,7 @@ static const struct vulkan_funcs vulkan_funcs =
     .p_vkDestroySurfaceKHR = wayland_vkDestroySurfaceKHR,
     .p_vkDestroySwapchainKHR = wayland_vkDestroySwapchainKHR,
     .p_vkEnumerateInstanceExtensionProperties = wayland_vkEnumerateInstanceExtensionProperties,
+    .p_vkGetDeviceGroupSurfacePresentModesKHR = wayland_vkGetDeviceGroupSurfacePresentModesKHR,
     .p_vkQueuePresentKHR = wayland_vkQueuePresentKHR,
 };
 

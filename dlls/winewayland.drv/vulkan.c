@@ -65,6 +65,8 @@ static VkResult (*pvkGetDeviceGroupSurfacePresentModesKHR)(VkDevice, VkSurfaceKH
 static void * (*pvkGetDeviceProcAddr)(VkDevice, const char *);
 static void * (*pvkGetInstanceProcAddr)(VkInstance, const char *);
 static VkResult (*pvkGetPhysicalDevicePresentRectanglesKHR)(VkPhysicalDevice, VkSurfaceKHR, uint32_t *, VkRect2D *);
+static VkResult (*pvkGetPhysicalDeviceSurfaceCapabilities2KHR)(VkPhysicalDevice, const VkPhysicalDeviceSurfaceInfo2KHR *, VkSurfaceCapabilities2KHR *);
+static VkResult (*pvkGetPhysicalDeviceSurfaceCapabilitiesKHR)(VkPhysicalDevice, VkSurfaceKHR, VkSurfaceCapabilitiesKHR *);
 static VkResult (*pvkQueuePresentKHR)(VkQueue, const VkPresentInfoKHR *);
 
 static void *vulkan_handle;
@@ -505,6 +507,106 @@ static VkResult wayland_vkGetPhysicalDevicePresentRectanglesKHR(VkPhysicalDevice
     return pvkGetPhysicalDevicePresentRectanglesKHR(phys_dev, surface, count, rects);
 }
 
+/* Set the image extent in the capabilities to match what Windows expects. */
+static void set_image_extent(VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR *caps)
+{
+    struct wine_vk_surface *wine_vk_surface = wine_vk_surface_from_handle(surface);
+    BOOL zero_extents = FALSE;
+
+    if (!wine_vk_surface || !wine_vk_surface->wayland_surface)
+        return;
+
+    wayland_mutex_lock(&wine_vk_surface->wayland_surface->mutex);
+    if (!wine_vk_surface->wayland_surface->drawing_allowed)
+        zero_extents = TRUE;
+    wayland_mutex_unlock(&wine_vk_surface->wayland_surface->mutex);
+
+    if (NtUserGetWindowLongW(wine_vk_surface->hwnd, GWL_STYLE) & WS_MINIMIZE)
+        zero_extents = TRUE;
+
+    if (zero_extents)
+    {
+        caps->minImageExtent.width = 0;
+        caps->minImageExtent.height = 0;
+        caps->maxImageExtent.width = 0;
+        caps->maxImageExtent.height = 0;
+        caps->currentExtent.width = 0;
+        caps->currentExtent.height = 0;
+    }
+    else
+    {
+        RECT client;
+        NtUserGetClientRect(wine_vk_surface->hwnd, &client);
+
+        caps->minImageExtent.width = client.right;
+        caps->minImageExtent.height = client.bottom;
+        caps->maxImageExtent.width = client.right;
+        caps->maxImageExtent.height = client.bottom;
+        caps->currentExtent.width = client.right;
+        caps->currentExtent.height = client.bottom;
+    }
+
+    TRACE("vk_surface=%s hwnd=%p wayland_surface=%p extent=%dx%d\n",
+          wine_dbgstr_longlong(surface), wine_vk_surface->hwnd,
+          wine_vk_surface->wayland_surface, caps->currentExtent.width,
+          caps->currentExtent.height);
+}
+
+static VkResult wayland_vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice phys_dev,
+                                                                   const VkPhysicalDeviceSurfaceInfo2KHR *surface_info,
+                                                                   VkSurfaceCapabilities2KHR *capabilities)
+{
+    VkResult res;
+
+    TRACE("%p, %p, %p\n", phys_dev, surface_info, capabilities);
+
+    if (!wine_vk_surface_handle_is_valid(surface_info->surface))
+        RETURN_VK_ERROR_SURFACE_LOST_KHR;
+
+    if (pvkGetPhysicalDeviceSurfaceCapabilities2KHR)
+    {
+        res = pvkGetPhysicalDeviceSurfaceCapabilities2KHR(phys_dev, surface_info,
+                                                          capabilities);
+        goto out;
+    }
+
+    /* Until the loader version exporting this function is common, emulate it
+     * using the older non-2 version. */
+    if (surface_info->pNext || capabilities->pNext)
+    {
+        FIXME("Emulating vkGetPhysicalDeviceSurfaceCapabilities2KHR with "
+              "vkGetPhysicalDeviceSurfaceCapabilitiesKHR, pNext is ignored.\n");
+    }
+
+    res = pvkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys_dev, surface_info->surface,
+                                                     &capabilities->surfaceCapabilities);
+
+out:
+    if (res == VK_SUCCESS)
+        set_image_extent(surface_info->surface, &capabilities->surfaceCapabilities);
+
+    return res;
+}
+
+static VkResult wayland_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice phys_dev,
+                                                                  VkSurfaceKHR surface,
+                                                                  VkSurfaceCapabilitiesKHR *capabilities)
+{
+    VkResult res;
+
+    TRACE("%p, 0x%s, %p\n", phys_dev, wine_dbgstr_longlong(surface), capabilities);
+
+    if (!wine_vk_surface_handle_is_valid(surface))
+        RETURN_VK_ERROR_SURFACE_LOST_KHR;
+
+    res = pvkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys_dev, surface, capabilities);
+
+    if (res == VK_SUCCESS)
+        set_image_extent(surface, capabilities);
+
+    return res;
+}
+
 static VkResult validate_present_info(const VkPresentInfoKHR *present_info)
 {
     uint32_t i;
@@ -620,6 +722,8 @@ static void wine_vk_init(void)
     LOAD_FUNCPTR(vkGetDeviceProcAddr);
     LOAD_FUNCPTR(vkGetInstanceProcAddr);
     LOAD_OPTIONAL_FUNCPTR(vkGetPhysicalDevicePresentRectanglesKHR);
+    LOAD_OPTIONAL_FUNCPTR(vkGetPhysicalDeviceSurfaceCapabilities2KHR);
+    LOAD_FUNCPTR(vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
     LOAD_FUNCPTR(vkQueuePresentKHR);
 #undef LOAD_FUNCPTR
 #undef LOAD_OPTIONAL_FUNCPTR
@@ -644,6 +748,8 @@ static const struct vulkan_funcs vulkan_funcs =
     .p_vkGetDeviceProcAddr = wayland_vkGetDeviceProcAddr,
     .p_vkGetInstanceProcAddr = wayland_vkGetInstanceProcAddr,
     .p_vkGetPhysicalDevicePresentRectanglesKHR = wayland_vkGetPhysicalDevicePresentRectanglesKHR,
+    .p_vkGetPhysicalDeviceSurfaceCapabilities2KHR = wayland_vkGetPhysicalDeviceSurfaceCapabilities2KHR,
+    .p_vkGetPhysicalDeviceSurfaceCapabilitiesKHR = wayland_vkGetPhysicalDeviceSurfaceCapabilitiesKHR,
     .p_vkQueuePresentKHR = wayland_vkQueuePresentKHR,
 };
 

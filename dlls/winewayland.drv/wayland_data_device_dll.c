@@ -22,6 +22,7 @@
 
 #define COBJMACROS
 #include "objidl.h"
+#include "shlobj.h"
 
 #include "wine/debug.h"
 
@@ -206,12 +207,75 @@ static HRESULT WINAPI dataOfferDataObject_SetData(IDataObject *data_object,
     return E_NOTIMPL;
 }
 
+static BOOL formats_etc_contains_clipboard_format(FORMATETC *formats_etc,
+                                                  size_t formats_etc_count,
+                                                  UINT clipboard_format)
+{
+    size_t i;
+
+    for (i = 0; i < formats_etc_count; i++)
+        if (formats_etc[i].cfFormat == clipboard_format) return TRUE;
+
+    return FALSE;
+}
+
 static HRESULT WINAPI dataOfferDataObject_EnumFormatEtc(IDataObject *data_object,
                                                         DWORD direction,
                                                         IEnumFORMATETC **enum_format_etc)
 {
+    HRESULT hr;
+    FORMATETC *formats_etc;
+    size_t formats_etc_count = 0;
+    struct waylanddrv_unix_data_offer_enum_formats_params params;
+
     TRACE("(%p, %lu, %p)\n", data_object, direction, enum_format_etc);
-    return E_NOTIMPL;
+
+    if (direction != DATADIR_GET)
+    {
+        FIXME("only the get direction is implemented\n");
+        return E_NOTIMPL;
+    }
+
+    params.data_offer = PtrToUint(data_object);
+    params.formats = NULL;
+    params.num_formats = 0;
+
+    WAYLANDDRV_UNIX_CALL(data_offer_enum_formats, &params);
+    params.formats = HeapAlloc(GetProcessHeap(), 0, params.num_formats * sizeof(UINT));
+    WAYLANDDRV_UNIX_CALL(data_offer_enum_formats, &params);
+    if (!params.formats)
+        return E_OUTOFMEMORY;
+
+    /* Allocate space for all offered mime types, although we may not use them all */
+    formats_etc = HeapAlloc(GetProcessHeap(), 0, params.num_formats * sizeof(FORMATETC));
+    if (!formats_etc)
+    {
+        HeapFree(GetProcessHeap(), 0, params.formats);
+        return E_OUTOFMEMORY;
+    }
+
+    for (int i = 0; i < params.num_formats; i++)
+    {
+        if (!formats_etc_contains_clipboard_format(formats_etc, formats_etc_count,
+                                                   params.formats[i]))
+        {
+            FORMATETC *current= &formats_etc[formats_etc_count];
+
+            current->cfFormat = params.formats[i];
+            current->ptd = NULL;
+            current->dwAspect = DVASPECT_CONTENT;
+            current->lindex = -1;
+            current->tymed = TYMED_HGLOBAL;
+
+            formats_etc_count += 1;
+        }
+    }
+
+    hr = SHCreateStdEnumFmtEtc(formats_etc_count, formats_etc, enum_format_etc);
+    HeapFree(GetProcessHeap(), 0, params.formats);
+    HeapFree(GetProcessHeap(), 0, formats_etc);
+
+    return hr;
 }
 
 static HRESULT WINAPI dataOfferDataObject_DAdvise(IDataObject *data_object,

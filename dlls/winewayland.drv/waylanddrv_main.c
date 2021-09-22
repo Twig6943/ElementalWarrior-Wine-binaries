@@ -228,6 +228,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     waylanddrv_unix_clipboard_message,
     waylanddrv_unix_data_offer_accept_format,
     waylanddrv_unix_data_offer_import_format,
+    waylanddrv_unix_data_offer_enum_formats,
 };
 
 C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == waylanddrv_unix_func_count);
@@ -251,6 +252,21 @@ static NTSTATUS waylanddrv_unix_clipboard_message_wow64(void *arg)
     return waylanddrv_unix_clipboard_message(&params);
 }
 
+static NTSTATUS waylanddrv_unix_data_offer_enum_formats_wow64(void *arg)
+{
+    struct {
+        PTR32 data_offer;
+        ULONG formats;
+        UINT num_formats;
+    } *params32 = arg;
+    struct waylanddrv_unix_data_offer_enum_formats_params params;
+
+    params.data_offer = params32->data_offer;
+    params.formats = UlongToPtr(params32->formats);
+    params.num_formats = params32->num_formats;
+    return waylanddrv_unix_data_offer_enum_formats(&params);
+}
+
 const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
 {
     waylanddrv_unix_init,
@@ -258,6 +274,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     waylanddrv_unix_clipboard_message_wow64,
     waylanddrv_unix_data_offer_accept_format,
     waylanddrv_unix_data_offer_import_format,
+    waylanddrv_unix_data_offer_enum_formats_wow64,
 };
 
 C_ASSERT(ARRAYSIZE(__wine_unix_call_wow64_funcs) == waylanddrv_unix_func_count);

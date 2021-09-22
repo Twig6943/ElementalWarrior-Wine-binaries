@@ -716,6 +716,30 @@ NTSTATUS waylanddrv_unix_data_offer_accept_format(void *arg)
     return STATUS_UNSUCCESSFUL;
 }
 
+NTSTATUS waylanddrv_unix_data_offer_enum_formats(void *arg)
+{
+    struct waylanddrv_unix_data_offer_enum_formats_params *p = arg;
+    struct wayland_data_offer *data_offer = UIntToPtr(p->data_offer);
+    char **mime;
+    UINT count = 0;
+
+    wl_array_for_each(mime, &data_offer->types)
+    {
+        struct wayland_data_device_format *format =
+            wayland_data_device_format_for_mime_type(*mime);
+        if (format)
+        {
+            if (p->formats && count < p->num_formats)
+                p->formats[count] = format->clipboard_format;
+            count++;
+        }
+    }
+
+    p->num_formats = count;
+
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS waylanddrv_unix_data_offer_import_format(void *arg)
 {
     struct waylanddrv_unix_data_offer_import_format_params *p = arg;

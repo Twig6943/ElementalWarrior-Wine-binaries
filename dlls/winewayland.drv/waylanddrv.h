@@ -244,6 +244,7 @@ struct wayland_data_device
     struct wl_data_device *wl_data_device;
     struct wl_data_offer *clipboard_wl_data_offer;
     struct wl_data_offer *dnd_wl_data_offer;
+    struct wl_data_source *wl_data_source;
 };
 
 struct wayland_data_device_format

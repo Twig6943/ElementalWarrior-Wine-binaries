@@ -30,8 +30,11 @@
 
 #include <assert.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(clipboard);
+
+#define WINEWAYLAND_TAG_MIME_TYPE "application/x.winewayland.tag"
 
 struct wayland_data_offer
 {
@@ -256,10 +259,163 @@ void wayland_data_device_deinit(struct wayland_data_device *data_device)
     wayland_data_device_destroy_clipboard_data_offer(data_device);
     wayland_data_device_destroy_dnd_data_offer(data_device);
 
+    if (data_device->wl_data_source)
+        wl_data_source_destroy(data_device->wl_data_source);
     if (data_device->wl_data_device)
         wl_data_device_destroy(data_device->wl_data_device);
 
     memset(data_device, 0, sizeof(*data_device));
+}
+
+/**********************************************************************
+ *          wl_data_source handling
+ */
+
+static void wayland_data_source_export(struct wayland_data_device_format *format, int32_t fd)
+{
+    struct get_clipboard_params params = { .data_only = TRUE, .data_size = 0 };
+    static const size_t buffer_size = 1024;
+
+    if (!(params.data = malloc(buffer_size))) return;
+
+    if (!NtUserOpenClipboard(thread_wayland()->clipboard_hwnd, 0))
+    {
+        TRACE("failed to open clipboard for export\n");
+        goto out;
+    }
+
+    params.size = buffer_size;
+    if (NtUserGetClipboardData(format->clipboard_format, &params))
+    {
+        format->export(format, fd, params.data, params.size);
+    }
+    else if (params.data_size)
+    {
+        /* If 'buffer_size' is too small, NtUserGetClipboardData writes the
+         * minimum size in 'params.data_size', so we retry with that. */
+        free(params.data);
+        params.data = malloc(params.data_size);
+        if (params.data)
+        {
+            params.size = params.data_size;
+            if (NtUserGetClipboardData(format->clipboard_format, &params))
+                format->export(format, fd, params.data, params.size);
+        }
+    }
+
+    NtUserCloseClipboard();
+
+out:
+    free(params.data);
+}
+
+static void data_source_target(void *data, struct wl_data_source *source,
+                               const char *mime_type)
+{
+}
+
+static void data_source_send(void *data, struct wl_data_source *source,
+                             const char *mime_type, int32_t fd)
+{
+    struct wayland_data_device_format *format =
+        wayland_data_device_format_for_mime_type(mime_type);
+
+    TRACE("source=%p mime_type=%s\n", source, mime_type);
+
+    if (format) wayland_data_source_export(format, fd);
+
+    close(fd);
+}
+
+static void data_source_cancelled(void *data, struct wl_data_source *source)
+{
+    struct wayland_data_device *data_device = data;
+
+    TRACE("source=%p\n", source);
+    wl_data_source_destroy(source);
+    data_device->wl_data_source = NULL;
+}
+
+static void data_source_dnd_drop_performed(void *data,
+                                           struct wl_data_source *source)
+{
+}
+
+static void data_source_dnd_finished(void *data, struct wl_data_source *source)
+{
+}
+
+static void data_source_action(void *data, struct wl_data_source *source,
+                               uint32_t dnd_action)
+{
+}
+
+static const struct wl_data_source_listener data_source_listener = {
+    data_source_target,
+    data_source_send,
+    data_source_cancelled,
+    data_source_dnd_drop_performed,
+    data_source_dnd_finished,
+    data_source_action,
+};
+
+/**********************************************************************
+ *          clipboard window handling
+ */
+
+static void clipboard_update(void)
+{
+    struct wayland *wayland = thread_wayland();
+    uint32_t enter_serial;
+    struct wl_data_source *source;
+    UINT clipboard_format = 0;
+
+    TRACE("WM_CLIPBOARDUPDATE wayland %p enter_serial=%d/%d\n",
+          wayland,
+          wayland ? wayland->keyboard.enter_serial : -1,
+          wayland ? wayland->pointer.enter_serial : -1);
+
+    if (!wayland)
+        return;
+
+    enter_serial = wayland->keyboard.enter_serial ? wayland->keyboard.enter_serial
+                                                  : wayland->pointer.enter_serial;
+
+    if (!enter_serial)
+        return;
+
+    if (!NtUserOpenClipboard(wayland->clipboard_hwnd, 0))
+    {
+        TRACE("failed to open clipboard\n");
+        return;
+    }
+
+    source = wl_data_device_manager_create_data_source(wayland->wl_data_device_manager);
+    /* Track the current wl_data_source, so we can properly destroy it during thread
+     * deinitilization, in case it has not been cancelled before that. */
+    if (wayland->data_device.wl_data_source)
+        wl_data_source_destroy(wayland->data_device.wl_data_source);
+    wayland->data_device.wl_data_source = source;
+
+    while ((clipboard_format = NtUserEnumClipboardFormats(clipboard_format)))
+    {
+        struct wayland_data_device_format *format =
+            wayland_data_device_format_for_clipboard_format(clipboard_format, NULL);
+        if (format)
+        {
+            TRACE("Offering source=%p mime=%s\n", source, format->mime_type);
+            wl_data_source_offer(source, format->mime_type);
+        }
+    }
+
+    /* Add a special entry so that we can detect when an offer is coming from us. */
+    wl_data_source_offer(source, WINEWAYLAND_TAG_MIME_TYPE);
+
+    wl_data_source_add_listener(source, &data_source_listener, &wayland->data_device);
+    wl_data_device_set_selection(wayland->data_device.wl_data_device, source,
+                                 enter_serial);
+
+    NtUserCloseClipboard();
 }
 
 /**********************************************************************
@@ -273,6 +429,11 @@ NTSTATUS waylanddrv_unix_clipboard_message(void *arg)
     {
     case WM_NCCREATE:
         return TRUE;
+    case WM_CLIPBOARDUPDATE:
+        TRACE("WM_CLIPBOARDUPDATE\n");
+        /* Ignore our own updates */
+        if (NtUserGetClipboardOwner() != params->hwnd) clipboard_update();
+        break;
     }
 
     return NtUserMessageCall(params->hwnd, params->msg, params->wparam,

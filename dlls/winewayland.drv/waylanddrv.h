@@ -246,6 +246,19 @@ struct wayland_data_device
     struct wl_data_offer *dnd_wl_data_offer;
 };
 
+struct wayland_data_device_format
+{
+    const char *mime_type;
+    UINT clipboard_format;
+    const WCHAR *register_name;
+    /* In case of failure, 'ret_size' is left unchanged. */
+    void *(*import)(struct wayland_data_device_format *format,
+                    const void *data, size_t data_size, size_t *ret_size);
+    void (*export)(struct wayland_data_device_format *format, int fd,
+                   void *data, size_t size);
+    UINT_PTR extra;
+};
+
 struct wayland
 {
     struct wl_list thread_link;
@@ -692,6 +705,10 @@ void wayland_data_device_init(struct wayland_data_device *data_device,
                               struct wayland *wayland) DECLSPEC_HIDDEN;
 void wayland_data_device_deinit(struct wayland_data_device *data_device) DECLSPEC_HIDDEN;
 void wayland_data_device_ensure_clipboard_window(struct wayland *wayland) DECLSPEC_HIDDEN;
+void wayland_data_device_init_formats(void) DECLSPEC_HIDDEN;
+struct wayland_data_device_format *wayland_data_device_format_for_mime_type(const char *mime) DECLSPEC_HIDDEN;
+struct wayland_data_device_format *wayland_data_device_format_for_clipboard_format(UINT clipboard_format,
+                                                                                   struct wl_array *mimes) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Registry helpers

@@ -132,7 +132,29 @@ static void export_text(struct wayland_data_device_format *format, int fd, void 
     free(bytes);
 }
 
+static void *import_data(struct wayland_data_device_format *format,
+                         const void *data, size_t data_size, size_t *ret_size)
+{
+    void *ret;
+
+    ret = malloc(data_size);
+    if (ret)
+    {
+        memcpy(ret, data, data_size);
+        if (ret_size) *ret_size = data_size;
+    }
+
+    return ret;
+}
+
+static void export_data(struct wayland_data_device_format *format, int fd, void *data, size_t size)
+{
+    write_all(fd, data, size);
+}
+
 #define CP_ASCII 20127
+
+static const WCHAR rich_text_formatW[] = {'R','i','c','h',' ','T','e','x','t',' ','F','o','r','m','a','t',0};
 
 /* Order is important. When selecting a mime-type for a clipboard format we
  * will choose the first entry that matches the specified clipboard format. */
@@ -141,6 +163,8 @@ static struct wayland_data_device_format supported_formats[] =
     {"text/plain;charset=utf-8", CF_UNICODETEXT, NULL, import_text_as_unicode, export_text, CP_UTF8},
     {"text/plain;charset=us-ascii", CF_UNICODETEXT, NULL, import_text_as_unicode, export_text, CP_ASCII},
     {"text/plain", CF_UNICODETEXT, NULL, import_text_as_unicode, export_text, CP_ASCII},
+    {"text/rtf", 0, rich_text_formatW, import_data, export_data, 0},
+    {"text/richtext", 0, rich_text_formatW, import_data, export_data, 0},
     {NULL, 0, NULL, NULL, NULL, 0},
 };
 

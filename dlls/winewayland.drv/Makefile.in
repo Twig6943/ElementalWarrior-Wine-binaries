@@ -19,6 +19,7 @@ C_SRCS = \
 	wayland.c \
 	wayland_buffer_queue.c \
 	wayland_cursor.c \
+	wayland_data_device.c \
 	wayland_dmabuf.c \
 	wayland_keyboard.c \
 	wayland_keyboard_layout.c \

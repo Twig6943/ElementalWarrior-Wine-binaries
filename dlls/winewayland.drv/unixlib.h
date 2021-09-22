@@ -23,11 +23,16 @@
 #include "ntuser.h"
 #include "wine/unixlib.h"
 
+/* A pointer to memory that is guaranteed to be usable by both 32-bit and
+ * 64-bit processes. */
+typedef UINT PTR32;
+
 enum waylanddrv_unix_func
 {
     waylanddrv_unix_func_init,
     waylanddrv_unix_func_read_events,
     waylanddrv_unix_func_clipboard_message,
+    waylanddrv_unix_func_data_offer_accept_format,
     waylanddrv_unix_func_count,
 };
 
@@ -37,6 +42,12 @@ struct waylanddrv_unix_clipboard_message_params
     UINT msg;
     WPARAM wparam;
     LPARAM lparam;
+};
+
+struct waylanddrv_unix_data_offer_accept_format_params
+{
+    PTR32 data_offer;
+    UINT format;
 };
 
 /* driver client callbacks exposed with KernelCallbackTable interface */

@@ -24,6 +24,10 @@
 
 #include "config.h"
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#define NONAMELESSUNION
+
 #include "waylanddrv.h"
 
 #include "wine/debug.h"
@@ -49,6 +53,7 @@ struct wayland_data_offer
     struct wl_array types;
     uint32_t source_actions;
     uint32_t action;
+    const char *accepted_mime_type;
 };
 
 /* Normalize the mime type by skipping inconsequential characters, such as
@@ -688,4 +693,25 @@ void wayland_data_device_ensure_clipboard_window(struct wayland *wayland)
         wayland->clipboard_hwnd =
             ULongToHandle(WAYLANDDRV_CLIENT_CALL(create_clipboard_window, NULL, 0));
     }
+}
+
+NTSTATUS waylanddrv_unix_data_offer_accept_format(void *arg)
+{
+    struct waylanddrv_unix_data_offer_accept_format_params *p = arg;
+    struct wayland_data_offer *data_offer = UIntToPtr(p->data_offer);
+    struct wayland_data_device_format *format;
+
+    TRACE("data_offer=%p clipboard_format=%d\n", data_offer, p->format);
+
+    format = wayland_data_device_format_for_clipboard_format(p->format,
+                                                             &data_offer->types);
+    if (format)
+    {
+        TRACE("found offer %s for clipboard format %u\n",
+              format->mime_type, format->clipboard_format);
+        data_offer->accepted_mime_type = format->mime_type;
+        return STATUS_SUCCESS;
+    }
+
+    return STATUS_UNSUCCESSFUL;
 }

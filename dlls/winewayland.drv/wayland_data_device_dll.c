@@ -137,10 +137,25 @@ static HRESULT WINAPI dataOfferDataObject_GetDataHere(IDataObject *data_object,
 static HRESULT WINAPI dataOfferDataObject_QueryGetData(IDataObject *data_object,
                                                        FORMATETC *format_etc)
 {
+    struct waylanddrv_unix_data_offer_accept_format_params params;
+
     TRACE("(%p, %p={.tymed=0x%lx, .dwAspect=%ld, .cfFormat=%d}\n",
           data_object, format_etc, format_etc->tymed, format_etc->dwAspect,
           format_etc->cfFormat);
 
+    if (format_etc->tymed && !(format_etc->tymed & TYMED_HGLOBAL))
+    {
+        FIXME("only HGLOBAL medium types supported right now\n");
+        return DV_E_TYMED;
+    }
+
+    params.data_offer = PtrToUint(data_object);
+    params.format = format_etc->cfFormat;
+
+    if (WAYLANDDRV_UNIX_CALL(data_offer_accept_format, &params) == 0)
+        return S_OK;
+
+    TRACE("didn't find offer for clipboard format %u\n", format_etc->cfFormat);
     return DV_E_FORMATETC;
 }
 

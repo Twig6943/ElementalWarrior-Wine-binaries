@@ -26,14 +26,155 @@
 
 #include "waylanddrv.h"
 
+#include "wine/debug.h"
+
+#include <assert.h>
+#include <stdlib.h>
+
+WINE_DEFAULT_DEBUG_CHANNEL(clipboard);
+
+struct wayland_data_offer
+{
+    struct wayland *wayland;
+    struct wl_data_offer *wl_data_offer;
+    struct wl_array types;
+    uint32_t source_actions;
+    uint32_t action;
+};
+
+/* Normalize the mime type by skipping inconsequential characters, such as
+ * spaces and double quotes, and converting to lower case. */
+static char *normalize_mime_type(const char *mime)
+{
+    char *new_mime;
+    const char *cur_read;
+    char *cur_write;
+    size_t new_mime_len = 0;
+
+    cur_read = mime;
+    for (; *cur_read != '\0'; cur_read++)
+    {
+        if (*cur_read != ' ' && *cur_read != '"')
+            new_mime_len++;
+    }
+
+    new_mime = malloc(new_mime_len + 1);
+    if (!new_mime) return NULL;
+    cur_read = mime;
+    cur_write = new_mime;
+
+    for (; *cur_read != '\0'; cur_read++)
+    {
+        if (*cur_read != ' ' && *cur_read != '"')
+            *cur_write++ = tolower(*cur_read);
+    }
+
+    *cur_write = '\0';
+
+    return new_mime;
+}
+
+/**********************************************************************
+ *          wl_data_offer handling
+ */
+
+static void data_offer_offer(void *data, struct wl_data_offer *wl_data_offer,
+                             const char *type)
+{
+    struct wayland_data_offer *data_offer = data;
+    char **p;
+
+    p = wl_array_add(&data_offer->types, sizeof *p);
+    *p = normalize_mime_type(type);
+}
+
+static void data_offer_source_actions(void *data,
+                                      struct wl_data_offer *wl_data_offer,
+                                      uint32_t source_actions)
+{
+    struct wayland_data_offer *data_offer = data;
+
+    data_offer->source_actions = source_actions;
+}
+
+static void data_offer_action(void *data, struct wl_data_offer *wl_data_offer,
+                              uint32_t dnd_action)
+{
+    struct wayland_data_offer *data_offer = data;
+
+    data_offer->action = dnd_action;
+}
+
+static const struct wl_data_offer_listener data_offer_listener = {
+    data_offer_offer,
+    data_offer_source_actions,
+    data_offer_action
+};
+
+static void wayland_data_offer_create(struct wayland *wayland,
+                                      struct wl_data_offer *wl_data_offer)
+{
+    struct wayland_data_offer *data_offer;
+
+    data_offer = calloc(1, sizeof(*data_offer));
+    if (!data_offer)
+    {
+        ERR("Failed to allocate memory for data offer\n");
+        return;
+    }
+
+    data_offer->wayland = wayland;
+    data_offer->wl_data_offer = wl_data_offer;
+    wl_array_init(&data_offer->types);
+    wl_data_offer_add_listener(data_offer->wl_data_offer,
+                               &data_offer_listener, data_offer);
+}
+
+static void wayland_data_offer_destroy(struct wayland_data_offer *data_offer)
+{
+    char **p;
+
+    wl_data_offer_destroy(data_offer->wl_data_offer);
+    wl_array_for_each(p, &data_offer->types)
+        free(*p);
+    wl_array_release(&data_offer->types);
+
+    free(data_offer);
+}
+
 /**********************************************************************
  *          wl_data_device handling
  */
+
+static void wayland_data_device_destroy_clipboard_data_offer(struct wayland_data_device *data_device)
+{
+    if (data_device->clipboard_wl_data_offer)
+    {
+        struct wayland_data_offer *data_offer =
+            wl_data_offer_get_user_data(data_device->clipboard_wl_data_offer);
+        wayland_data_offer_destroy(data_offer);
+        data_device->clipboard_wl_data_offer = NULL;
+    }
+}
+
+static void wayland_data_device_destroy_dnd_data_offer(struct wayland_data_device *data_device)
+{
+    if (data_device->dnd_wl_data_offer)
+    {
+        struct wayland_data_offer *data_offer =
+            wl_data_offer_get_user_data(data_device->dnd_wl_data_offer);
+        wayland_data_offer_destroy(data_offer);
+        data_device->dnd_wl_data_offer = NULL;
+    }
+}
 
 static void data_device_data_offer(void *data,
                                    struct wl_data_device *wl_data_device,
                                    struct wl_data_offer *wl_data_offer)
 {
+    struct wayland_data_device *data_device = data;
+
+    wayland_data_offer_create(data_device->wayland, wl_data_offer);
 }
 
 static void data_device_enter(void *data, struct wl_data_device *wl_data_device,
@@ -41,10 +182,19 @@ static void data_device_enter(void *data, struct wl_data_device *wl_data_device,
                               wl_fixed_t x_w, wl_fixed_t y_w,
                               struct wl_data_offer *wl_data_offer)
 {
+    struct wayland_data_device *data_device = data;
+
+    /* Any previous dnd offer should have been freed by a drop or leave event. */
+    assert(data_device->dnd_wl_data_offer == NULL);
+
+    data_device->dnd_wl_data_offer = wl_data_offer;
 }
 
 static void data_device_leave(void *data, struct wl_data_device *wl_data_device)
 {
+    struct wayland_data_device *data_device = data;
+
+    wayland_data_device_destroy_dnd_data_offer(data_device);
 }
 
 static void data_device_motion(void *data, struct wl_data_device *wl_data_device,
@@ -54,12 +204,21 @@ static void data_device_motion(void *data, struct wl_data_device *wl_data_device
 
 static void data_device_drop(void *data, struct wl_data_device *wl_data_device)
 {
+    struct wayland_data_device *data_device = data;
+
+    wayland_data_device_destroy_dnd_data_offer(data_device);
 }
 
 static void data_device_selection(void *data,
                                   struct wl_data_device *wl_data_device,
                                   struct wl_data_offer *wl_data_offer)
 {
+    struct wayland_data_device *data_device = data;
+
+    /* Destroy any previous data offer. */
+    wayland_data_device_destroy_clipboard_data_offer(data_device);
+
+    data_device->clipboard_wl_data_offer = wl_data_offer;
 }
 
 static const struct wl_data_device_listener data_device_listener = {
@@ -94,6 +253,9 @@ void wayland_data_device_init(struct wayland_data_device *data_device,
  */
 void wayland_data_device_deinit(struct wayland_data_device *data_device)
 {
+    wayland_data_device_destroy_clipboard_data_offer(data_device);
+    wayland_data_device_destroy_dnd_data_offer(data_device);
+
     if (data_device->wl_data_device)
         wl_data_device_destroy(data_device->wl_data_device);
 

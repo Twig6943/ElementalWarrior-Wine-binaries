@@ -239,6 +239,8 @@ struct wayland_data_device
 {
     struct wayland *wayland;
     struct wl_data_device *wl_data_device;
+    struct wl_data_offer *clipboard_wl_data_offer;
+    struct wl_data_offer *dnd_wl_data_offer;
 };
 
 struct wayland

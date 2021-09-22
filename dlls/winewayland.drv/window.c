@@ -1786,6 +1786,9 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             wayland_surface_for_hwnd_unlock(wayland_surface);
         }
         break;
+    case WM_WAYLAND_CLIPBOARD_WINDOW_CREATE:
+        wayland_data_device_ensure_clipboard_window(thread_wayland());
+        break;
     default:
         FIXME("got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (long)wp, lp);
     }

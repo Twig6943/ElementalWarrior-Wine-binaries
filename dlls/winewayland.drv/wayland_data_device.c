@@ -261,3 +261,35 @@ void wayland_data_device_deinit(struct wayland_data_device *data_device)
 
     memset(data_device, 0, sizeof(*data_device));
 }
+
+/**********************************************************************
+ *          waylanddrv_unix_clipboard_message
+ */
+NTSTATUS waylanddrv_unix_clipboard_message(void *arg)
+{
+    struct waylanddrv_unix_clipboard_message_params *params = arg;
+
+    switch (params->msg)
+    {
+    case WM_NCCREATE:
+        return TRUE;
+    }
+
+    return NtUserMessageCall(params->hwnd, params->msg, params->wparam,
+                             params->lparam, NULL, NtUserDefWindowProc, FALSE);
+}
+
+/**********************************************************************
+ *          wayland_data_device_ensure_clipboard_window
+ *
+ * Creates (if not already created) the window which handles clipboard
+ * messages for the specified wayland instance.
+ */
+void wayland_data_device_ensure_clipboard_window(struct wayland *wayland)
+{
+    if (!wayland->clipboard_hwnd)
+    {
+        wayland->clipboard_hwnd =
+            ULongToHandle(WAYLANDDRV_CLIENT_CALL(create_clipboard_window, NULL, 0));
+    }
+}

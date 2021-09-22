@@ -1,5 +1,6 @@
 MODULE = winewayland.drv
 UNIXLIB = winewayland.so
+IMPORTS = user32
 UNIX_CFLAGS = $(WAYLAND_CLIENT_CFLAGS) $(WAYLAND_CURSOR_CFLAGS) $(XKBCOMMON_CFLAGS) \
               $(GBM_CFLAGS) $(UDEV_CFLAGS) $(DRM_CFLAGS)
 UNIX_LIBS = -lwin32u -lm $(WAYLAND_CLIENT_LIBS) $(WAYLAND_CURSOR_LIBS) \
@@ -20,6 +21,7 @@ C_SRCS = \
 	wayland_buffer_queue.c \
 	wayland_cursor.c \
 	wayland_data_device.c \
+	wayland_data_device_dll.c \
 	wayland_dmabuf.c \
 	wayland_keyboard.c \
 	wayland_keyboard_layout.c \

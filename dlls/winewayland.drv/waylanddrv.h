@@ -77,6 +77,7 @@ enum wayland_window_message
     WM_WAYLAND_WINDOW_SURFACE_FLUSH,
     WM_WAYLAND_REMOTE_SURFACE,
     WM_WAYLAND_POINTER_CONSTRAINT_UPDATE,
+    WM_WAYLAND_CLIPBOARD_WINDOW_CREATE,
 };
 
 enum wayland_surface_role
@@ -278,6 +279,7 @@ struct wayland
     uint32_t last_button_serial;
     int last_event_type;
     int event_notification_pipe[2];
+    HWND clipboard_hwnd;
     RECT cursor_clip;
 };
 
@@ -689,6 +691,7 @@ void wayland_invalidate_vulkan_objects(HWND hwnd) DECLSPEC_HIDDEN;
 void wayland_data_device_init(struct wayland_data_device *data_device,
                               struct wayland *wayland) DECLSPEC_HIDDEN;
 void wayland_data_device_deinit(struct wayland_data_device *data_device) DECLSPEC_HIDDEN;
+void wayland_data_device_ensure_clipboard_window(struct wayland *wayland) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Registry helpers
@@ -802,6 +805,7 @@ static inline HWND get_focus(void)
 
 NTSTATUS waylanddrv_client_call(enum waylanddrv_client_func func, const void *params,
                                 ULONG size) DECLSPEC_HIDDEN;
+NTSTATUS waylanddrv_unix_clipboard_message(void *arg) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          USER driver functions

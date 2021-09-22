@@ -29,6 +29,9 @@
 #include "wine/debug.h"
 
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -143,6 +146,111 @@ static void wayland_data_offer_destroy(struct wayland_data_offer *data_offer)
     wl_array_release(&data_offer->types);
 
     free(data_offer);
+}
+
+static void *wayland_data_offer_receive_data(struct wayland_data_offer *data_offer,
+                                             const char *mime_type,
+                                             size_t *size_out)
+{
+    int data_pipe[2] = {-1, -1};
+    size_t buffer_size = 4096;
+    int total = 0;
+    unsigned char *buffer;
+    int nread;
+
+    buffer = malloc(buffer_size);
+    if (buffer == NULL)
+    {
+        ERR("failed to allocate read buffer for data offer\n");
+        goto out;
+    }
+
+    if (pipe2(data_pipe, O_CLOEXEC) == -1)
+        goto out;
+
+    TRACE("mime_type=%s\n", mime_type);
+
+    wl_data_offer_receive(data_offer->wl_data_offer, mime_type, data_pipe[1]);
+    close(data_pipe[1]);
+
+    /* Flush to ensure our receive request reaches the server. */
+    wl_display_flush(data_offer->wayland->wl_display);
+
+    do
+    {
+        struct pollfd pfd = { .fd = data_pipe[0], .events = POLLIN };
+        int ret;
+
+        /* Wait a limited amount of time for the data to arrive, since otherwise
+         * a misbehaving data source could block us indefinitely. */
+        while ((ret = poll(&pfd, 1, 3000)) == -1 && errno == EINTR) continue;
+        if (ret <= 0 || !(pfd.revents & (POLLIN | POLLHUP)))
+        {
+            TRACE("failed polling data offer pipe ret=%d errno=%d revents=0x%x\n",
+                  ret, ret == -1 ? errno : 0, pfd.revents);
+            total = 0;
+            goto out;
+        }
+
+        nread = read(data_pipe[0], buffer + total, buffer_size - total);
+        if (nread == -1 && errno != EINTR)
+        {
+            ERR("failed to read data offer pipe\n");
+            total = 0;
+            goto out;
+        }
+        else if (nread > 0)
+        {
+            total += nread;
+            if (total == buffer_size)
+            {
+                unsigned char *new_buffer;
+                buffer_size += 4096;
+                new_buffer = realloc(buffer, buffer_size);
+                if (!new_buffer)
+                {
+                    ERR("failed to reallocate read buffer for data offer\n");
+                    total = 0;
+                    goto out;
+                }
+                buffer = new_buffer;
+            }
+        }
+    } while (nread > 0);
+
+    TRACE("received %d bytes\n", total);
+
+out:
+    if (data_pipe[0] >= 0)
+        close(data_pipe[0]);
+
+    if (total == 0 && buffer != NULL)
+    {
+        free(buffer);
+        buffer = NULL;
+    }
+
+    *size_out = total;
+
+    return buffer;
+}
+
+static void *wayland_data_offer_import_format(struct wayland_data_offer *data_offer,
+                                              struct wayland_data_device_format *format,
+                                              size_t *ret_size)
+{
+    size_t data_size;
+    void *data, *ret;
+
+    data = wayland_data_offer_receive_data(data_offer, format->mime_type, &data_size);
+    if (!data)
+        return NULL;
+
+    ret = format->import(format, data, data_size, ret_size);
+
+    free(data);
+
+    return ret;
 }
 
 /**********************************************************************
@@ -418,6 +526,33 @@ static void clipboard_update(void)
     NtUserCloseClipboard();
 }
 
+static void clipboard_render_format(UINT clipboard_format)
+{
+    struct wayland_data_device *data_device;
+    struct wayland_data_offer *data_offer;
+    struct wayland_data_device_format *format;
+
+    data_device = wl_data_device_get_user_data(thread_wayland()->data_device.wl_data_device);
+    if (!data_device->clipboard_wl_data_offer)
+        return;
+
+    data_offer = wl_data_offer_get_user_data(data_device->clipboard_wl_data_offer);
+    if (!data_offer)
+        return;
+
+    format = wayland_data_device_format_for_clipboard_format(clipboard_format,
+                                                             &data_offer->types);
+    if (format)
+    {
+        struct set_clipboard_params params = { 0 };
+        if ((params.data = wayland_data_offer_import_format(data_offer, format, &params.size)))
+        {
+            NtUserSetClipboardData(format->clipboard_format, 0, &params);
+            free(params.data);
+        }
+    }
+}
+
 /**********************************************************************
  *          waylanddrv_unix_clipboard_message
  */
@@ -433,6 +568,10 @@ NTSTATUS waylanddrv_unix_clipboard_message(void *arg)
         TRACE("WM_CLIPBOARDUPDATE\n");
         /* Ignore our own updates */
         if (NtUserGetClipboardOwner() != params->hwnd) clipboard_update();
+        break;
+    case WM_RENDERFORMAT:
+        TRACE("WM_RENDERFORMAT: %ld\n", (long)params->wparam);
+        clipboard_render_format(params->wparam);
         break;
     }
 

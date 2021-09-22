@@ -553,6 +553,14 @@ static void clipboard_render_format(UINT clipboard_format)
     }
 }
 
+static void clipboard_destroy(void)
+{
+    struct wayland *wayland = thread_wayland();
+    struct wayland_data_device *data_device =
+        wl_data_device_get_user_data(wayland->data_device.wl_data_device);
+    wayland_data_device_destroy_clipboard_data_offer(data_device);
+}
+
 /**********************************************************************
  *          waylanddrv_unix_clipboard_message
  */
@@ -572,6 +580,10 @@ NTSTATUS waylanddrv_unix_clipboard_message(void *arg)
     case WM_RENDERFORMAT:
         TRACE("WM_RENDERFORMAT: %ld\n", (long)params->wparam);
         clipboard_render_format(params->wparam);
+        break;
+    case WM_DESTROYCLIPBOARD:
+        TRACE("WM_DESTROYCLIPBOARD: clipboard_hwnd=%p\n", params->hwnd);
+        clipboard_destroy();
         break;
     }
 

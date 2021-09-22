@@ -20,9 +20,14 @@
 
 #include "waylanddrv_dll.h"
 
+#define COBJMACROS
+#include "objidl.h"
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(clipboard);
+
+static IDataObjectVtbl dataOfferDataObjectVtbl;
 
 static LRESULT CALLBACK clipboard_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
@@ -76,3 +81,131 @@ NTSTATUS WINAPI waylanddrv_client_create_clipboard_window(void *arg, ULONG size)
     TRACE("clipboard_hwnd=%p\n", clipboard_hwnd);
     return HandleToUlong(clipboard_hwnd);
 }
+
+/*********************************************************
+ * Implementation of IDataObject for wayland data offers *
+ *********************************************************/
+
+static HRESULT WINAPI dataOfferDataObject_QueryInterface(IDataObject *data_object,
+                                                         REFIID riid, void **object)
+{
+    TRACE("(%p, %s, %p)\n", data_object, debugstr_guid(riid), object);
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDataObject))
+    {
+        *object = data_object;
+        IDataObject_AddRef(data_object);
+        return S_OK;
+    }
+    *object = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI dataOfferDataObject_AddRef(IDataObject *data_object)
+{
+    TRACE("(%p)\n", data_object);
+    /* Each data object is owned by the data_offer which contains it, and will
+     * be freed when the data_offer is destroyed, so we don't care about proper
+     * reference tracking. */
+    return 2;
+}
+
+static ULONG WINAPI dataOfferDataObject_Release(IDataObject *data_object)
+{
+    TRACE("(%p)\n", data_object);
+    /* Each data object is owned by the data_offer which contains it, and will
+     * be freed when, so we don't care about proper reference tracking. */
+    return 1;
+}
+
+static HRESULT WINAPI dataOfferDataObject_GetData(IDataObject *data_object,
+                                                  FORMATETC *format_etc,
+                                                  STGMEDIUM *medium)
+{
+    TRACE("(%p, %p, %p)\n", data_object, format_etc, medium);
+
+    return E_UNEXPECTED;
+}
+
+static HRESULT WINAPI dataOfferDataObject_GetDataHere(IDataObject *data_object,
+                                                      FORMATETC *format_etc,
+                                                      STGMEDIUM *medium)
+{
+    FIXME("(%p, %p, %p): stub\n", data_object, format_etc, medium);
+    return DATA_E_FORMATETC;
+}
+
+static HRESULT WINAPI dataOfferDataObject_QueryGetData(IDataObject *data_object,
+                                                       FORMATETC *format_etc)
+{
+    TRACE("(%p, %p={.tymed=0x%lx, .dwAspect=%ld, .cfFormat=%d}\n",
+          data_object, format_etc, format_etc->tymed, format_etc->dwAspect,
+          format_etc->cfFormat);
+
+    return DV_E_FORMATETC;
+}
+
+static HRESULT WINAPI dataOfferDataObject_GetCanonicalFormatEtc(IDataObject *data_object,
+                                                                FORMATETC *format_etc,
+                                                                FORMATETC *format_etc_out)
+{
+    FIXME("(%p, %p, %p): stub\n", data_object, format_etc, format_etc_out);
+    format_etc_out->ptd = NULL;
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dataOfferDataObject_SetData(IDataObject *data_object,
+                                                  FORMATETC *format_etc,
+                                                  STGMEDIUM *medium, BOOL release)
+{
+    FIXME("(%p, %p, %p, %s): stub\n", data_object, format_etc,
+          medium, release ? "TRUE" : "FALSE");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dataOfferDataObject_EnumFormatEtc(IDataObject *data_object,
+                                                        DWORD direction,
+                                                        IEnumFORMATETC **enum_format_etc)
+{
+    TRACE("(%p, %lu, %p)\n", data_object, direction, enum_format_etc);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dataOfferDataObject_DAdvise(IDataObject *data_object,
+                                                  FORMATETC *format_etc, DWORD advf,
+                                                  IAdviseSink *advise_sink,
+                                                  DWORD *connection)
+{
+    FIXME("(%p, %p, %lu, %p, %p): stub\n", data_object, format_etc, advf,
+          advise_sink, connection);
+    return OLE_E_ADVISENOTSUPPORTED;
+}
+
+static HRESULT WINAPI dataOfferDataObject_DUnadvise(IDataObject *data_object,
+                                                    DWORD connection)
+{
+    FIXME("(%p, %lu): stub\n", data_object, connection);
+    return OLE_E_ADVISENOTSUPPORTED;
+}
+
+static HRESULT WINAPI dataOfferDataObject_EnumDAdvise(IDataObject *data_object,
+                                                      IEnumSTATDATA **enum_advise)
+{
+    FIXME("(%p, %p): stub\n", data_object, enum_advise);
+    return OLE_E_ADVISENOTSUPPORTED;
+}
+
+static IDataObjectVtbl dataOfferDataObjectVtbl =
+{
+    dataOfferDataObject_QueryInterface,
+    dataOfferDataObject_AddRef,
+    dataOfferDataObject_Release,
+    dataOfferDataObject_GetData,
+    dataOfferDataObject_GetDataHere,
+    dataOfferDataObject_QueryGetData,
+    dataOfferDataObject_GetCanonicalFormatEtc,
+    dataOfferDataObject_SetData,
+    dataOfferDataObject_EnumFormatEtc,
+    dataOfferDataObject_DAdvise,
+    dataOfferDataObject_DUnadvise,
+    dataOfferDataObject_EnumDAdvise
+};

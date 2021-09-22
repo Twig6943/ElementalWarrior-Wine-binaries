@@ -28,6 +28,8 @@
 
 #include "wine/debug.h"
 
+#include "objidl.h"
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -41,6 +43,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(clipboard);
 
 struct wayland_data_offer
 {
+    IDataObject data_object;
     struct wayland *wayland;
     struct wl_data_offer *wl_data_offer;
     struct wl_array types;
@@ -117,13 +120,26 @@ static const struct wl_data_offer_listener data_offer_listener = {
     data_offer_action
 };
 
+static ULONG_PTR zero_bits(void)
+{
+#ifdef _WIN64
+    return !NtCurrentTeb()->WowTebOffset ? 0 : 0x7fffffff;
+#else
+    return 0;
+#endif
+}
+
 static void wayland_data_offer_create(struct wayland *wayland,
                                       struct wl_data_offer *wl_data_offer)
 {
-    struct wayland_data_offer *data_offer;
+    struct wayland_data_offer *data_offer = NULL;
+    SIZE_T size = sizeof(*data_offer);
 
-    data_offer = calloc(1, sizeof(*data_offer));
-    if (!data_offer)
+    /* Ensure that the PE side can access the 'data_object' member, by
+     * allocating wayland_data_offer in Windows virtual memory. */
+    if (NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&data_offer,
+                                zero_bits(), &size, MEM_COMMIT, PAGE_READWRITE) ||
+        !data_offer)
     {
         ERR("Failed to allocate memory for data offer\n");
         return;
@@ -139,13 +155,14 @@ static void wayland_data_offer_create(struct wayland *wayland,
 static void wayland_data_offer_destroy(struct wayland_data_offer *data_offer)
 {
     char **p;
+    SIZE_T size = 0;
 
     wl_data_offer_destroy(data_offer->wl_data_offer);
     wl_array_for_each(p, &data_offer->types)
         free(*p);
     wl_array_release(&data_offer->types);
 
-    free(data_offer);
+    NtFreeVirtualMemory(GetCurrentProcess(), (void **)&data_offer, &size, MEM_RELEASE);
 }
 
 static void *wayland_data_offer_receive_data(struct wayland_data_offer *data_offer,

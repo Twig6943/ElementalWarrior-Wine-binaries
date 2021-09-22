@@ -29,8 +29,10 @@
 #include "wine/debug.h"
 
 #include "winternl.h"
+#include "winnls.h"
 
 #include <errno.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(clipboard);
@@ -55,10 +57,90 @@ static void write_all(int fd, const void *buf, size_t count)
     }
 }
 
+#define NLS_SECTION_CODEPAGE 11
+
+static BOOL get_cp_tableinfo(ULONG cp, CPTABLEINFO *cptable)
+{
+    USHORT *ptr;
+    SIZE_T nls_size;
+
+    if (!NtGetNlsSectionPtr(NLS_SECTION_CODEPAGE, cp, NULL, (void **)&ptr, &nls_size))
+    {
+        RtlInitCodePageTable(ptr, cptable);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+static void *import_text_as_unicode(struct wayland_data_device_format *format,
+                                    const void *data, size_t data_size, size_t *ret_size)
+{
+    DWORD wsize;
+    void *ret;
+
+    if (format->extra == CP_UTF8)
+    {
+        RtlUTF8ToUnicodeN(NULL, 0, &wsize, data, data_size);
+        if (!(ret = malloc(wsize + sizeof(WCHAR)))) return NULL;
+        RtlUTF8ToUnicodeN(ret, wsize, &wsize, data, data_size);
+    }
+    else
+    {
+        CPTABLEINFO cptable;
+        /* In the worst case, each byte of the input text data corresponds
+         * to a single character, which may need up to two WCHAR for UTF-16
+         * encoding. */
+        wsize = data_size * sizeof(WCHAR) * 2;
+        if (!get_cp_tableinfo(format->extra, &cptable)) return NULL;
+        if (!(ret = malloc(wsize + sizeof(WCHAR)))) return NULL;
+        RtlCustomCPToUnicodeN(&cptable, ret, wsize, &wsize, data, data_size);
+    }
+    ((WCHAR *)ret)[wsize / sizeof(WCHAR)] = 0;
+
+    if (ret_size) *ret_size = wsize + sizeof(WCHAR);
+
+    return ret;
+}
+
+static void export_text(struct wayland_data_device_format *format, int fd, void *data, size_t size)
+{
+    DWORD byte_count;
+    char *bytes;
+
+    /* Wayland apps expect strings to not be zero-terminated, so avoid
+     * zero-terminating the resulting converted string. */
+    if (((WCHAR *)data)[size / sizeof(WCHAR) - 1] == 0) size -= sizeof(WCHAR);
+
+    if (format->extra == CP_UTF8)
+    {
+        RtlUnicodeToUTF8N(NULL, 0, &byte_count, data, size);
+        if (!(bytes = malloc(byte_count))) return;
+        RtlUnicodeToUTF8N(bytes, byte_count, &byte_count, data, size);
+    }
+    else
+    {
+        CPTABLEINFO cptable;
+        if (!get_cp_tableinfo(format->extra, &cptable)) return;
+        byte_count = size / sizeof(WCHAR) * cptable.MaximumCharacterSize;
+        if (!(bytes = malloc(byte_count))) return;
+        RtlUnicodeToCustomCPN(&cptable, bytes, byte_count, &byte_count, data, size);
+    }
+
+    write_all(fd, bytes, byte_count);
+
+    free(bytes);
+}
+
+#define CP_ASCII 20127
+
 /* Order is important. When selecting a mime-type for a clipboard format we
  * will choose the first entry that matches the specified clipboard format. */
 static struct wayland_data_device_format supported_formats[] =
 {
+    {"text/plain;charset=utf-8", CF_UNICODETEXT, NULL, import_text_as_unicode, export_text, CP_UTF8},
+    {"text/plain;charset=us-ascii", CF_UNICODETEXT, NULL, import_text_as_unicode, export_text, CP_ASCII},
+    {"text/plain", CF_UNICODETEXT, NULL, import_text_as_unicode, export_text, CP_ASCII},
     {NULL, 0, NULL, NULL, NULL, 0},
 };
 

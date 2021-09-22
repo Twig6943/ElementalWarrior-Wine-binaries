@@ -516,6 +516,9 @@ out:
 #define CP_ASCII 20127
 
 static const WCHAR rich_text_formatW[] = {'R','i','c','h',' ','T','e','x','t',' ','F','o','r','m','a','t',0};
+static const WCHAR pngW[] = {'P','N','G',0};
+static const WCHAR jfifW[] = {'J','F','I','F',0};
+static const WCHAR gifW[] = {'G','I','F',0};
 
 /* Order is important. When selecting a mime-type for a clipboard format we
  * will choose the first entry that matches the specified clipboard format. */
@@ -527,6 +530,10 @@ static struct wayland_data_device_format supported_formats[] =
     {"text/rtf", 0, rich_text_formatW, import_data, export_data, 0},
     {"text/richtext", 0, rich_text_formatW, import_data, export_data, 0},
     {"text/uri-list", CF_HDROP, NULL, import_uri_list, export_hdrop, 0},
+    {"image/tiff", CF_TIFF, NULL, import_data, export_data, 0},
+    {"image/png", 0, pngW, import_data, export_data, 0},
+    {"image/jpeg", 0, jfifW, import_data, export_data, 0},
+    {"image/gif", 0, gifW, import_data, export_data, 0},
     {NULL, 0, NULL, NULL, NULL, 0},
 };
 

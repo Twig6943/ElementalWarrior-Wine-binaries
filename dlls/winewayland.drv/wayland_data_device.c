@@ -88,6 +88,20 @@ static char *normalize_mime_type(const char *mime)
     return new_mime;
 }
 
+static DWORD dnd_actions_to_drop_effect(uint32_t actions)
+{
+    DWORD drop_effect = 0;
+
+    if (actions & WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY)
+        drop_effect |= DROPEFFECT_COPY;
+    if (actions & WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE)
+        drop_effect |= DROPEFFECT_MOVE;
+    if (actions & WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK)
+        drop_effect |= DROPEFFECT_COPY | DROPEFFECT_MOVE;
+
+    return drop_effect;
+}
+
 /**********************************************************************
  *          wl_data_offer handling
  */
@@ -315,12 +329,58 @@ static void data_device_enter(void *data, struct wl_data_device *wl_data_device,
                               wl_fixed_t x_w, wl_fixed_t y_w,
                               struct wl_data_offer *wl_data_offer)
 {
+    struct waylanddrv_client_dnd_params params;
     struct wayland_data_device *data_device = data;
+    struct wayland_data_offer *data_offer;
+    struct wayland_surface *wayland_surface;
+    POINT point;
 
     /* Any previous dnd offer should have been freed by a drop or leave event. */
     assert(data_device->dnd_wl_data_offer == NULL);
 
     data_device->dnd_wl_data_offer = wl_data_offer;
+
+    if (!wl_data_offer)
+        return;
+
+    data_offer = wl_data_offer_get_user_data(wl_data_offer);
+
+    wayland_surface = wl_surface_get_user_data(wl_surface);
+
+    if (!wayland_surface || !wayland_surface->hwnd)
+        return;
+
+    data_device->dnd_enter_serial = serial;
+    data_device->dnd_surface = wayland_surface;
+    data_device->dnd_x = wl_fixed_to_int(x_w);
+    data_device->dnd_y = wl_fixed_to_int(y_w);
+
+    wayland_surface_coords_to_screen(data_device->dnd_surface,
+                                     data_device->dnd_x, data_device->dnd_y,
+                                     (int *)&point.x, (int *)&point.y);
+
+    TRACE("surface=%p hwnd=%p source_actions=%x action=%x\n",
+          data_device->dnd_surface, data_device->dnd_surface->hwnd,
+          data_offer->source_actions, data_offer->action);
+
+    /* Clear accepted_mime_type here. It should be eventually set by
+     * the DnD client call below. */
+    data_offer->accepted_mime_type = NULL;
+
+    params.event = CLIENT_DND_EVENT_ENTER;
+    params.hwnd = HandleToULong(data_device->dnd_surface->hwnd);
+    params.point = point;
+    params.drop_effect = dnd_actions_to_drop_effect(data_offer->source_actions);
+    params.data_object = PtrToUint(data_offer);
+
+    if (WAYLANDDRV_CLIENT_CALL(dnd, &params, sizeof(params)) != 0)
+        return;
+
+    wl_data_offer_set_actions(wl_data_offer, data_offer->source_actions,
+                              data_offer->action);
+    wl_data_offer_accept(wl_data_offer,
+                         data_device->dnd_enter_serial,
+                         data_offer->accepted_mime_type);
 }
 
 static void data_device_leave(void *data, struct wl_data_device *wl_data_device)

@@ -18,6 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+
 #include "waylanddrv_dll.h"
 
 #define COBJMACROS
@@ -181,6 +184,45 @@ static IDropTarget *drop_target_from_window_point(HWND hwnd, POINT point)
     TRACE("hwnd=%p point=(%ld,%ld) => dnd_hwnd=%p drop_target=%p\n",
           orig_hwnd, orig_point.x, orig_point.y, hwnd, drop_target);
     return drop_target;
+}
+
+static NTSTATUS WINAPI waylanddrv_client_dnd_enter(void *params, ULONG size)
+{
+    struct waylanddrv_client_dnd_params *p = params;
+    IDropTarget *drop_target;
+    DWORD drop_effect = p->drop_effect;
+    IDataObject *data_object = UIntToPtr(p->data_object);
+    HRESULT hr;
+
+    /* If unixlib is 64 bits and PE is 32 bits, this will write a 32 bit
+     * pointer value to the bottom of 64 bit pointer variable, which works out
+     * fine due to little-endianness and the fact that lpVtbl has been zero
+     * initialized. */
+    data_object->lpVtbl = &dataOfferDataObjectVtbl;
+
+    drop_target = drop_target_from_window_point(ULongToHandle(p->hwnd), p->point);
+    if (!drop_target)
+        return STATUS_UNSUCCESSFUL;
+
+    hr = IDropTarget_DragEnter(drop_target, data_object, MK_LBUTTON,
+                               *(POINTL*)&p->point, &drop_effect);
+    IDropTarget_Release(drop_target);
+    if (FAILED(hr))
+        return STATUS_UNSUCCESSFUL;
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS WINAPI waylanddrv_client_dnd(void *params, ULONG size)
+{
+    struct waylanddrv_client_dnd_params *p = params;
+
+    switch (p->event) {
+    case CLIENT_DND_EVENT_ENTER:
+        return waylanddrv_client_dnd_enter(params, size);
+    }
+
+    return STATUS_UNSUCCESSFUL;
 }
 
 /*********************************************************

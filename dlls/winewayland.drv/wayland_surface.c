@@ -671,6 +671,7 @@ void wayland_surface_destroy(struct wayland_surface *surface)
 {
     struct wayland_pointer *pointer = &surface->wayland->pointer;
     struct wayland_keyboard *keyboard = &surface->wayland->keyboard;
+    struct wayland_data_device *data_device = &surface->wayland->data_device;
     struct wayland_surface *child, *child_tmp;
     struct wayland_output_ref *ref, *ref_tmp;
 
@@ -681,6 +682,9 @@ void wayland_surface_destroy(struct wayland_surface *surface)
 
     if (keyboard->focused_surface == surface)
         keyboard->focused_surface = NULL;
+
+    if (data_device->dnd_surface == surface)
+        data_device->dnd_surface = NULL;
 
     /* There are children left only when we force a destruction during
      * thread deinitialization, otherwise the children hold a reference

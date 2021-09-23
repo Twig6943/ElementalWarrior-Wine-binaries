@@ -26,6 +26,9 @@
 /* A pointer to memory that is guaranteed to be usable by both 32-bit and
  * 64-bit processes. */
 typedef UINT PTR32;
+/* A handle value that is guaranteed to be usable by both 32-bit and 64-bit
+ * processes. */
+typedef UINT HANDLE32;
 
 enum waylanddrv_unix_func
 {
@@ -71,9 +74,24 @@ struct waylanddrv_unix_data_offer_enum_formats_params
 enum waylanddrv_client_func
 {
     waylanddrv_client_func_create_clipboard_window = NtUserDriverCallbackFirst,
+    waylanddrv_client_func_dnd,
     waylanddrv_client_func_last
 };
 
 C_ASSERT(waylanddrv_client_func_last <= NtUserDriverCallbackLast + 1);
+
+enum waylanddrv_client_dnd_event
+{
+    CLIENT_DND_EVENT_ENTER,
+};
+
+struct waylanddrv_client_dnd_params
+{
+    UINT event;
+    HANDLE32 hwnd;
+    POINT point;
+    DWORD drop_effect;
+    PTR32 data_object;
+};
 
 #endif /* __WINE_WAYLANDDRV_UNIXLIB_H */

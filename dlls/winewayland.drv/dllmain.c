@@ -24,6 +24,7 @@ typedef NTSTATUS (WINAPI *kernel_callback)(void *params, ULONG size);
 static const kernel_callback kernel_callbacks[] =
 {
     waylanddrv_client_create_clipboard_window,
+    waylanddrv_client_dnd,
 };
 
 C_ASSERT(NtUserDriverCallbackFirst + ARRAYSIZE(kernel_callbacks) == waylanddrv_client_func_last);

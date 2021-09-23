@@ -385,8 +385,30 @@ static void data_device_enter(void *data, struct wl_data_device *wl_data_device,
 
 static void data_device_leave(void *data, struct wl_data_device *wl_data_device)
 {
+    struct waylanddrv_client_dnd_params params;
     struct wayland_data_device *data_device = data;
+    POINT point;
 
+    TRACE("surface=%p hwnd=%p\n",
+          data_device->dnd_surface,
+          data_device->dnd_surface ? data_device->dnd_surface->hwnd : 0);
+
+    if (!data_device->dnd_wl_data_offer || !data_device->dnd_surface)
+        goto out;
+
+    wayland_surface_coords_to_screen(data_device->dnd_surface,
+                                     data_device->dnd_x, data_device->dnd_y,
+                                     (int *)&point.x, (int *)&point.y);
+
+    params.event = CLIENT_DND_EVENT_LEAVE;
+    params.hwnd = HandleToULong(data_device->dnd_surface->hwnd);
+    params.point = point;
+    params.drop_effect = 0;
+    params.data_object = 0;
+
+    WAYLANDDRV_CLIENT_CALL(dnd, &params, sizeof(params));
+
+out:
     wayland_data_device_destroy_dnd_data_offer(data_device);
 }
 

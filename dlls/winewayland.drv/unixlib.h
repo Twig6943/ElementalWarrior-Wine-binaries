@@ -83,6 +83,7 @@ C_ASSERT(waylanddrv_client_func_last <= NtUserDriverCallbackLast + 1);
 enum waylanddrv_client_dnd_event
 {
     CLIENT_DND_EVENT_ENTER,
+    CLIENT_DND_EVENT_LEAVE,
 };
 
 struct waylanddrv_client_dnd_params

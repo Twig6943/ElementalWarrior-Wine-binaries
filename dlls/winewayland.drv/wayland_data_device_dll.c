@@ -83,6 +83,106 @@ NTSTATUS WINAPI waylanddrv_client_create_clipboard_window(void *arg, ULONG size)
     return HandleToUlong(clipboard_hwnd);
 }
 
+/**********************************************************************
+ *          IDropTarget discovery
+ *
+ * Based on functions in dlls/ole32/ole2.c
+ */
+
+static HANDLE get_drop_target_local_handle(HWND hwnd)
+{
+    static const WCHAR prop_marshalleddrop_target[] =
+        {'W','i','n','e','M','a','r','s','h','a','l','l','e','d',
+         'D','r','o','p','T','a','r','g','e','t',0};
+    HANDLE handle;
+    HANDLE local_handle = 0;
+
+    handle = GetPropW(hwnd, prop_marshalleddrop_target);
+    if (handle)
+    {
+        DWORD pid;
+        HANDLE process;
+
+        GetWindowThreadProcessId(hwnd, &pid);
+        process = OpenProcess(PROCESS_DUP_HANDLE, FALSE, pid);
+        if (process)
+        {
+            DuplicateHandle(process, handle, GetCurrentProcess(), &local_handle,
+                            0, FALSE, DUPLICATE_SAME_ACCESS);
+            CloseHandle(process);
+        }
+    }
+    return local_handle;
+}
+
+static HRESULT create_stream_from_map(HANDLE map, IStream **stream)
+{
+    HRESULT hr = E_OUTOFMEMORY;
+    HGLOBAL hmem;
+    void *data;
+    MEMORY_BASIC_INFORMATION info;
+
+    data = MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0);
+    if(!data) return hr;
+
+    VirtualQuery(data, &info, sizeof(info));
+
+    hmem = GlobalAlloc(GMEM_MOVEABLE, info.RegionSize);
+    if(hmem)
+    {
+        memcpy(GlobalLock(hmem), data, info.RegionSize);
+        GlobalUnlock(hmem);
+        hr = CreateStreamOnHGlobal(hmem, TRUE, stream);
+    }
+    UnmapViewOfFile(data);
+    return hr;
+}
+
+static IDropTarget* get_drop_target_pointer(HWND hwnd)
+{
+    IDropTarget *drop_target = NULL;
+    HANDLE map;
+    IStream *stream;
+
+    map = get_drop_target_local_handle(hwnd);
+    if(!map) return NULL;
+
+    if(SUCCEEDED(create_stream_from_map(map, &stream)))
+    {
+        CoUnmarshalInterface(stream, &IID_IDropTarget, (void**)&drop_target);
+        IStream_Release(stream);
+    }
+    CloseHandle(map);
+    return drop_target;
+}
+
+static IDropTarget *drop_target_from_window_point(HWND hwnd, POINT point)
+{
+    HWND child;
+    IDropTarget *drop_target;
+    HWND orig_hwnd = hwnd;
+    POINT orig_point = point;
+
+    /* Find the deepest child window. */
+    ScreenToClient(hwnd, &point);
+    while ((child = ChildWindowFromPointEx(hwnd, point, CWP_SKIPDISABLED | CWP_SKIPINVISIBLE)) &&
+            child != hwnd)
+    {
+        MapWindowPoints(hwnd, child, &point, 1);
+        hwnd = child;
+    }
+
+    /* Ascend the children hierarchy until we find one that accepts drops. */
+    do
+    {
+        drop_target = get_drop_target_pointer(hwnd);
+    } while (drop_target == NULL && (hwnd = GetParent(hwnd)) != NULL);
+
+    TRACE("hwnd=%p point=(%ld,%ld) => dnd_hwnd=%p drop_target=%p\n",
+          orig_hwnd, orig_point.x, orig_point.y, hwnd, drop_target);
+    return drop_target;
+}
+
 /*********************************************************
  * Implementation of IDataObject for wayland data offers *
  *********************************************************/

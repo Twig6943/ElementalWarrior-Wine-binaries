@@ -415,6 +415,42 @@ out:
 static void data_device_motion(void *data, struct wl_data_device *wl_data_device,
                                uint32_t time, wl_fixed_t x_w, wl_fixed_t y_w)
 {
+    struct waylanddrv_client_dnd_params params;
+    struct wayland_data_device *data_device = data;
+    struct wayland_data_offer *data_offer;
+    POINT point;
+
+    if (!data_device->dnd_wl_data_offer || !data_device->dnd_surface)
+        return;
+
+    data_offer = wl_data_offer_get_user_data(data_device->dnd_wl_data_offer);
+
+    data_device->dnd_x = wl_fixed_to_int(x_w);
+    data_device->dnd_y = wl_fixed_to_int(y_w);
+
+    wayland_surface_coords_to_screen(data_device->dnd_surface,
+                                     data_device->dnd_x, data_device->dnd_y,
+                                     (int *)&point.x, (int *)&point.y);
+
+    TRACE("surface=%p hwnd=%p source_actions=%x action=%x\n",
+          data_device->dnd_surface, data_device->dnd_surface->hwnd,
+          data_offer->source_actions, data_offer->action);
+
+    params.event = CLIENT_DND_EVENT_MOTION;
+    params.hwnd = HandleToULong(data_device->dnd_surface->hwnd);
+    params.point = point;
+    params.drop_effect = dnd_actions_to_drop_effect(data_offer->source_actions);
+    params.data_object = PtrToUint(data_offer);
+
+    if (WAYLANDDRV_CLIENT_CALL(dnd, &params, sizeof(params)) != 0)
+        return;
+
+    wl_data_offer_set_actions(data_device->dnd_wl_data_offer,
+                              data_offer->source_actions,
+                              data_offer->action);
+    wl_data_offer_accept(data_device->dnd_wl_data_offer,
+                         data_device->dnd_enter_serial,
+                         data_offer->accepted_mime_type);
 }
 
 static void data_device_drop(void *data, struct wl_data_device *wl_data_device)

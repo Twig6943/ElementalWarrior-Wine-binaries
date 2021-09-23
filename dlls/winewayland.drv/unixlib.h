@@ -84,6 +84,7 @@ enum waylanddrv_client_dnd_event
 {
     CLIENT_DND_EVENT_ENTER,
     CLIENT_DND_EVENT_LEAVE,
+    CLIENT_DND_EVENT_MOTION,
 };
 
 struct waylanddrv_client_dnd_params

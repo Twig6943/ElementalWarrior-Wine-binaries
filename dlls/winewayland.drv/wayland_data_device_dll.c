@@ -251,6 +251,27 @@ static NTSTATUS WINAPI waylanddrv_client_dnd_motion(void *params, ULONG size)
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS WINAPI waylanddrv_client_dnd_drop(void *params, ULONG size)
+{
+    struct waylanddrv_client_dnd_params *p = params;
+    IDropTarget *drop_target;
+    DWORD drop_effect = p->drop_effect;
+    IDataObject *data_object = UIntToPtr(p->data_object);
+    HRESULT hr;
+
+    drop_target = drop_target_from_window_point(ULongToHandle(p->hwnd), p->point);
+    if (drop_target)
+    {
+        hr = IDropTarget_Drop(drop_target, data_object, MK_LBUTTON,
+                              *(POINTL*)&p->point, &drop_effect);
+        IDropTarget_Release(drop_target);
+        if (SUCCEEDED(hr) && drop_effect != DROPEFFECT_NONE)
+            return STATUS_SUCCESS;
+    }
+
+    return STATUS_UNSUCCESSFUL;
+}
+
 NTSTATUS WINAPI waylanddrv_client_dnd(void *params, ULONG size)
 {
     struct waylanddrv_client_dnd_params *p = params;
@@ -262,6 +283,8 @@ NTSTATUS WINAPI waylanddrv_client_dnd(void *params, ULONG size)
         return waylanddrv_client_dnd_leave(params, size);
     case CLIENT_DND_EVENT_MOTION:
         return waylanddrv_client_dnd_motion(params, size);
+    case CLIENT_DND_EVENT_DROP:
+        return waylanddrv_client_dnd_drop(params, size);
     }
 
     return STATUS_UNSUCCESSFUL;

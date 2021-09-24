@@ -274,6 +274,11 @@ static void wayland_output_list_update_physical_coords(struct wl_list *output_li
         cur->y = cur->logical_y;
     }
 
+    /* When compositor scaling is used, we treat logical coordinates as
+     * physical. */
+    if (option_hidpi_scaling == WAYLAND_HIDPI_SCALING_COMPOSITOR)
+        return;
+
     /* Sort and process the outputs from left to right. */
     cur_p = sorted_x = wayland_output_list_sorted(output_list, wayland_output_cmp_x);
     if (!sorted_x) return;
@@ -338,6 +343,15 @@ static void wayland_output_update_scale(struct wayland_output *output)
 {
     double inferred_scale = 0.0;
 
+    /* When compositor scaling is used, we ignore the output scale, to
+     * allow the the compositor to scale us. */
+    if (option_hidpi_scaling == WAYLAND_HIDPI_SCALING_COMPOSITOR)
+    {
+        output->scale = 1.0;
+        TRACE("using scale=%.2f to enable compositor scaling\n", output->scale);
+        return;
+    }
+
     if (output->logical_w != 0 && output->logical_h != 0 &&
         output->current_mode)
     {
@@ -368,6 +382,17 @@ static void wayland_output_done(struct wayland_output *output)
     struct wayland_output *o;
 
     TRACE("output->name=%s\n", output->name);
+
+    /* When compositor scaling is used, the current and only native mode
+     * corresponds to the logical width and height. */
+    if (option_hidpi_scaling == WAYLAND_HIDPI_SCALING_COMPOSITOR)
+    {
+        int32_t current_refresh =
+            output->current_mode ? output->current_mode->refresh : default_refresh;
+        wayland_output_clear_modes(output);
+        wayland_output_add_mode_all_bpp(output, output->logical_w, output->logical_h,
+                                        current_refresh, TRUE, TRUE);
+    }
 
     wayland_output_add_default_modes(output);
     wayland_output_list_update_physical_coords(&output->wayland->output_list);
@@ -418,6 +443,12 @@ static void output_handle_mode(void *data, struct wl_output *wl_output,
                                int32_t refresh)
 {
     struct wayland_output *output = data;
+
+    /* When compositor scaling is used, we don't use physical width/height
+     * for modes and the current mode will be set based on logical width
+     * and height (see wayland_output_done()). */
+    if (option_hidpi_scaling == WAYLAND_HIDPI_SCALING_COMPOSITOR)
+        return;
 
     /* Windows apps don't expect a zero refresh rate, so use a default value. */
     if (refresh == 0) refresh = default_refresh;

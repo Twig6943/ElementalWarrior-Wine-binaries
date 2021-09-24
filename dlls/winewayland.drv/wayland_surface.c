@@ -33,6 +33,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
+/* Change to 1 to dump committed buffer contents to disk */
+#define DEBUG_DUMP_COMMIT_BUFFER 0
+
 static void wayland_surface_set_main_output(struct wayland_surface *surface,
                                             struct wayland_output *output);
 
@@ -629,6 +632,15 @@ BOOL wayland_surface_commit_buffer(struct wayland_surface *surface,
         TRACE("surface=%p buffer=%p dropping buffer\n", surface, shm_buffer);
         shm_buffer->busy = FALSE;
         return FALSE;
+    }
+
+    if (DEBUG_DUMP_COMMIT_BUFFER)
+    {
+        static int dbgid = 0;
+        dump_pixels("/tmp/winewaylanddbg/commit-%.4d.pam", dbgid++, shm_buffer->map_data,
+                    shm_buffer->width, shm_buffer->height,
+                    shm_buffer->format == WL_SHM_FORMAT_ARGB8888,
+                    shm_buffer->damage_region, NULL);
     }
 
     wl_surface_attach(surface->wl_surface, shm_buffer->wl_buffer, 0, 0);

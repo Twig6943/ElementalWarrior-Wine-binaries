@@ -40,6 +40,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
+/* Change to 1 to dump flushed surface buffer contents to disk */
+#define DEBUG_DUMP_FLUSH_SURFACE_BUFFER 0
+
+/* Change to 1 to dump front buffer contents to disk when performing front
+ * buffer rendering. */
+#define DEBUG_DUMP_FRONT_BUFFER 0
+
 struct wayland_window_surface
 {
     struct window_surface header;
@@ -560,6 +567,15 @@ void wayland_window_surface_flush(struct window_surface *window_surface)
 
     assert(wws->wayland_buffer_queue);
 
+    if (DEBUG_DUMP_FLUSH_SURFACE_BUFFER)
+    {
+        static int dbgid = 0;
+        dump_pixels("/tmp/winewaylanddbg/flush-%.4d.pam", dbgid++, wws->bits,
+                    wws->info.bmiHeader.biWidth, abs(wws->info.bmiHeader.biHeight),
+                    wws->wayland_buffer_queue->format == WL_SHM_FORMAT_ARGB8888,
+                    surface_damage_region, wws->total_region);
+    }
+
     wayland_buffer_queue_add_damage(wws->wayland_buffer_queue, surface_damage_region);
     buffer = wayland_buffer_queue_acquire_buffer(wws->wayland_buffer_queue);
     if (!buffer)
@@ -820,6 +836,15 @@ void wayland_window_surface_update_front_buffer(struct window_surface *window_su
     else
     {
         WARN("Failed to allocate memory for front buffer pixels\n");
+    }
+
+    if (DEBUG_DUMP_FRONT_BUFFER && wws->front_bits)
+    {
+        static int dbgid = 0;
+        dump_pixels("/tmp/winewaylanddbg/front-%.4d.pam", dbgid++,
+                    wws->front_bits, wws->info.bmiHeader.biWidth,
+                    abs(wws->info.bmiHeader.biHeight),
+                    FALSE, NULL, NULL);
     }
 
 out:

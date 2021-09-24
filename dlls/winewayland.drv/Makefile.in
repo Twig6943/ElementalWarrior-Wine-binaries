@@ -10,6 +10,7 @@ UNIX_LIBS = -lwin32u -lm $(WAYLAND_CLIENT_LIBS) $(WAYLAND_CURSOR_LIBS) \
 C_SRCS = \
 	display.c \
 	dllmain.c \
+	dump_pixels.c \
 	gbm.c \
 	gdi.c \
 	opengl.c \

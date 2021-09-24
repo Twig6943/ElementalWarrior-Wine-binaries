@@ -168,6 +168,8 @@ static NTSTATUS waylanddrv_unix_init(void *arg)
 
     wayland_init_process_name();
 
+    wayland_read_options_from_registry();
+
     if (!wayland_init_set_cursor()) goto err;
 
     if (!wayland_process_init()) goto err;

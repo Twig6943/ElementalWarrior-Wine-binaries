@@ -7,6 +7,7 @@ C_SRCS = \
 	display.c \
 	dllmain.c \
 	gdi.c \
+	options.c \
 	registry.c \
 	unicode.c \
 	wayland.c \

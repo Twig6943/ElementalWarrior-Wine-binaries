@@ -147,6 +147,7 @@ struct wayland_surface
     struct wayland_mutex mutex;
     struct wayland_surface_configure pending;
     struct wayland_surface_configure current;
+    BOOL mapped;
     LONG ref;
     enum wayland_surface_role role;
 };
@@ -270,6 +271,7 @@ BOOL wayland_surface_commit_buffer(struct wayland_surface *surface,
                                    struct wayland_shm_buffer *shm_buffer,
                                    HRGN surface_damage_region) DECLSPEC_HIDDEN;
 void wayland_surface_destroy(struct wayland_surface *surface) DECLSPEC_HIDDEN;
+void wayland_surface_unmap(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 void wayland_surface_ack_pending_configure(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 void wayland_surface_coords_from_wine(struct wayland_surface *surface,
                                       int wine_x, int wine_y,

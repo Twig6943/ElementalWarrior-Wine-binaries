@@ -37,7 +37,7 @@ static void handle_xdg_surface_configure(void *data, struct xdg_surface *xdg_sur
 {
     struct wayland_surface *surface = data;
 
-    TRACE("serial=%u\n", serial);
+    TRACE("hwnd=%p serial=%u\n", surface->hwnd, serial);
 
     surface->pending.serial = serial;
 
@@ -347,7 +347,7 @@ BOOL wayland_surface_commit_buffer(struct wayland_surface *surface,
  */
 void wayland_surface_destroy(struct wayland_surface *surface)
 {
-    TRACE("surface=%p\n", surface);
+    TRACE("surface=%p hwnd=%p\n", surface, surface->hwnd);
 
     if (surface->xdg_toplevel)
     {

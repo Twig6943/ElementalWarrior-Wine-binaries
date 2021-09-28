@@ -144,6 +144,7 @@ struct wayland_surface
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *xdg_toplevel;
     struct wayland_surface *parent;
+    HWND hwnd;
     struct wayland_mutex mutex;
     struct wayland_surface_configure pending;
     struct wayland_surface_configure current;

@@ -273,6 +273,35 @@ void wayland_surface_destroy(struct wayland_surface *surface)
 }
 
 /**********************************************************************
+ *          wayland_surface_coords_from_wine
+ *
+ * Converts the window-local wine coordinates to wayland surface-local coordinates.
+ */
+void wayland_surface_coords_from_wine(struct wayland_surface *surface,
+                                      int wine_x, int wine_y,
+                                      double *wayland_x, double *wayland_y)
+{
+    *wayland_x = wine_x;
+    *wayland_y = wine_y;
+}
+
+/**********************************************************************
+ *          wayland_surface_coords_rounded_from_wine
+ *
+ * Converts the window-local wine coordinates to wayland surface-local coordinates
+ * rounding to the closest integer value.
+ */
+void wayland_surface_coords_rounded_from_wine(struct wayland_surface *surface,
+                                              int wine_x, int wine_y,
+                                              int *wayland_x, int *wayland_y)
+{
+    double w_x, w_y;
+    wayland_surface_coords_from_wine(surface, wine_x, wine_y, &w_x, &w_y);
+    *wayland_x = round(w_x);
+    *wayland_y = round(w_y);
+}
+
+/**********************************************************************
  *          wayland_surface_ref
  *
  * Add a reference to a wayland_surface.

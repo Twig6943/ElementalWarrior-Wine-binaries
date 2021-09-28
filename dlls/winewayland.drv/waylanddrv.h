@@ -29,6 +29,7 @@
 #include <stdarg.h>
 #include <wayland-client.h>
 #include "xdg-output-unstable-v1-client-protocol.h"
+#include "xdg-shell-client-protocol.h"
 
 #include "windef.h"
 #include "winbase.h"
@@ -53,6 +54,13 @@ enum wayland_window_message
     WM_WAYLAND_MONITOR_CHANGE = 0x80001000,
 };
 
+enum wayland_surface_role
+{
+    WAYLAND_SURFACE_ROLE_NONE,
+    WAYLAND_SURFACE_ROLE_SUBSURFACE,
+    WAYLAND_SURFACE_ROLE_TOPLEVEL,
+};
+
 /**********************************************************************
  *          Definitions for wayland types
  */
@@ -75,6 +83,8 @@ struct wayland
     struct wl_event_queue *wl_event_queue;
     struct wl_registry *wl_registry;
     struct wl_compositor *wl_compositor;
+    struct wl_subcompositor *wl_subcompositor;
+    struct xdg_wm_base *xdg_wm_base;
     struct wl_shm *wl_shm;
     struct zxdg_output_manager_v1 *zxdg_output_manager_v1;
     uint32_t next_fallback_output_id;
@@ -108,6 +118,18 @@ struct wayland_output
     char *name;
     WCHAR wine_name[128];
     uint32_t global_id;
+};
+
+struct wayland_surface
+{
+    struct wayland *wayland;
+    struct wl_surface *wl_surface;
+    struct wl_subsurface *wl_subsurface;
+    struct xdg_surface *xdg_surface;
+    struct xdg_toplevel *xdg_toplevel;
+    struct wayland_surface *parent;
+    LONG ref;
+    enum wayland_surface_role role;
 };
 
 struct wayland_native_buffer
@@ -212,6 +234,19 @@ struct wayland_output *wayland_output_get_by_wine_name(struct wayland *wayland,
  */
 
 int wayland_dispatch_queue(struct wl_event_queue *queue, int timeout_ms) DECLSPEC_HIDDEN;
+
+/**********************************************************************
+ *          Wayland surface
+ */
+
+struct wayland_surface *wayland_surface_create_plain(struct wayland *wayland) DECLSPEC_HIDDEN;
+void wayland_surface_make_toplevel(struct wayland_surface *surface,
+                                   struct wayland_surface *parent) DECLSPEC_HIDDEN;
+void wayland_surface_make_subsurface(struct wayland_surface *surface,
+                                     struct wayland_surface *parent) DECLSPEC_HIDDEN;
+void wayland_surface_destroy(struct wayland_surface *surface) DECLSPEC_HIDDEN;
+struct wayland_surface *wayland_surface_ref(struct wayland_surface *surface) DECLSPEC_HIDDEN;
+void wayland_surface_unref(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Wayland native buffer

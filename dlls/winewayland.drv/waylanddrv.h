@@ -61,6 +61,14 @@ enum wayland_surface_role
     WAYLAND_SURFACE_ROLE_TOPLEVEL,
 };
 
+enum wayland_configure_flags
+{
+    WAYLAND_CONFIGURE_FLAG_RESIZING   = (1 << 0),
+    WAYLAND_CONFIGURE_FLAG_ACTIVATED  = (1 << 1),
+    WAYLAND_CONFIGURE_FLAG_MAXIMIZED  = (1 << 2),
+    WAYLAND_CONFIGURE_FLAG_FULLSCREEN = (1 << 3),
+};
+
 /**********************************************************************
  *          Definitions for wayland types
  */
@@ -120,6 +128,14 @@ struct wayland_output
     uint32_t global_id;
 };
 
+struct wayland_surface_configure
+{
+    int width;
+    int height;
+    enum wayland_configure_flags configure_flags;
+    uint32_t serial;
+};
+
 struct wayland_surface
 {
     struct wayland *wayland;
@@ -128,6 +144,8 @@ struct wayland_surface
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *xdg_toplevel;
     struct wayland_surface *parent;
+    struct wayland_surface_configure pending;
+    struct wayland_surface_configure current;
     LONG ref;
     enum wayland_surface_role role;
 };
@@ -245,6 +263,7 @@ void wayland_surface_make_toplevel(struct wayland_surface *surface,
 void wayland_surface_make_subsurface(struct wayland_surface *surface,
                                      struct wayland_surface *parent) DECLSPEC_HIDDEN;
 void wayland_surface_destroy(struct wayland_surface *surface) DECLSPEC_HIDDEN;
+void wayland_surface_ack_pending_configure(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 struct wayland_surface *wayland_surface_ref(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 void wayland_surface_unref(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 

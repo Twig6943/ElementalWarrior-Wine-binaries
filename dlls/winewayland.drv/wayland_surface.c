@@ -31,6 +31,89 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
+static void handle_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
+                                         uint32_t serial)
+{
+    struct wayland_surface *surface = data;
+
+    TRACE("serial=%u\n", serial);
+
+    surface->pending.serial = serial;
+
+    wayland_surface_ack_pending_configure(surface);
+}
+
+/**********************************************************************
+ *          wayland_surface_ack_pending_configure
+ *
+ * Acks the pending configure event, making it current.
+ */
+void wayland_surface_ack_pending_configure(struct wayland_surface *surface)
+{
+    if (!surface->xdg_surface || !surface->pending.serial)
+        return;
+
+    TRACE("Setting current serial=%u size=%dx%d flags=%#x\n",
+          surface->pending.serial, surface->pending.width,
+          surface->pending.height, surface->pending.configure_flags);
+
+    surface->current = surface->pending;
+    xdg_surface_ack_configure(surface->xdg_surface, surface->current.serial);
+
+    memset(&surface->pending, 0, sizeof(surface->pending));
+}
+
+static const struct xdg_surface_listener xdg_surface_listener = {
+    handle_xdg_surface_configure,
+};
+
+static void handle_xdg_toplevel_configure(void *data,
+                                          struct xdg_toplevel *xdg_toplevel,
+                                          int32_t width, int32_t height,
+                                          struct wl_array *states)
+{
+    struct wayland_surface *surface = data;
+    uint32_t *state;
+    int flags = 0;
+
+    wl_array_for_each(state, states)
+    {
+        switch(*state)
+        {
+        case XDG_TOPLEVEL_STATE_MAXIMIZED:
+            flags |= WAYLAND_CONFIGURE_FLAG_MAXIMIZED;
+            break;
+        case XDG_TOPLEVEL_STATE_ACTIVATED:
+            flags |= WAYLAND_CONFIGURE_FLAG_ACTIVATED;
+            break;
+        case XDG_TOPLEVEL_STATE_RESIZING:
+            flags |= WAYLAND_CONFIGURE_FLAG_RESIZING;
+            break;
+        case XDG_TOPLEVEL_STATE_FULLSCREEN:
+            flags |= WAYLAND_CONFIGURE_FLAG_FULLSCREEN;
+            break;
+        default:
+            break;
+        }
+    }
+
+    surface->pending.width = width;
+    surface->pending.height = height;
+    surface->pending.configure_flags = flags;
+
+    TRACE("%dx%d flags=%#x\n", width, height, flags);
+}
+
+static void handle_xdg_toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel)
+{
+    TRACE("\n");
+}
+
+static const struct xdg_toplevel_listener xdg_toplevel_listener = {
+    handle_xdg_toplevel_configure,
+    handle_xdg_toplevel_close,
+};
+
 /**********************************************************************
  *          wayland_surface_create_plain
  *
@@ -82,10 +165,12 @@ void wayland_surface_make_toplevel(struct wayland_surface *surface,
         xdg_wm_base_get_xdg_surface(wayland->xdg_wm_base, surface->wl_surface);
     if (!surface->xdg_surface)
         goto err;
+    xdg_surface_add_listener(surface->xdg_surface, &xdg_surface_listener, surface);
 
     surface->xdg_toplevel = xdg_surface_get_toplevel(surface->xdg_surface);
     if (!surface->xdg_toplevel)
         goto err;
+    xdg_toplevel_add_listener(surface->xdg_toplevel, &xdg_toplevel_listener, surface);
 
     if (parent && parent->xdg_toplevel)
         xdg_toplevel_set_parent(surface->xdg_toplevel, parent->xdg_toplevel);
@@ -93,6 +178,10 @@ void wayland_surface_make_toplevel(struct wayland_surface *surface,
     wl_surface_commit(surface->wl_surface);
 
     surface->role = WAYLAND_SURFACE_ROLE_TOPLEVEL;
+
+    /* Wait for the first configure event. */
+    while (!surface->current.serial)
+        wl_display_roundtrip_queue(wayland->wl_display, wayland->wl_event_queue);
 
     return;
 

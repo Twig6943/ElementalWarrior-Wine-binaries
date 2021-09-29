@@ -53,15 +53,47 @@ static void *opengl_handle;
 static EGLDisplay egl_display;
 static EGLint egl_version[2];
 static struct opengl_funcs egl_funcs;
+static char wgl_extensions[4096];
 
 #define DECL_FUNCPTR(f) static __typeof__(f) * p_##f = NULL
 DECL_FUNCPTR(eglGetDisplay);
 DECL_FUNCPTR(eglInitialize);
 #undef DECL_FUNCPTR
 
+/***********************************************************************
+ *		wayland_wglGetExtensionsStringARB
+ */
+static const char *wayland_wglGetExtensionsStringARB(HDC hdc)
+{
+    TRACE("() returning \"%s\"\n", wgl_extensions);
+    return wgl_extensions;
+}
+
+/***********************************************************************
+ *		wayland_wglGetExtensionsStringEXT
+ */
+static const char *wayland_wglGetExtensionsStringEXT(void)
+{
+    TRACE("() returning \"%s\"\n", wgl_extensions);
+    return wgl_extensions;
+}
+
+static void register_extension(const char *ext)
+{
+    if (wgl_extensions[0]) strcat(wgl_extensions, " ");
+    strcat(wgl_extensions, ext);
+    TRACE("%s\n", ext);
+}
+
 static void init_extensions(void)
 {
     void *ptr;
+
+    register_extension("WGL_ARB_extensions_string");
+    egl_funcs.ext.p_wglGetExtensionsStringARB = wayland_wglGetExtensionsStringARB;
+
+    register_extension("WGL_EXT_extensions_string");
+    egl_funcs.ext.p_wglGetExtensionsStringEXT = wayland_wglGetExtensionsStringEXT;
 
     /* load standard functions and extensions exported from the OpenGL library */
 

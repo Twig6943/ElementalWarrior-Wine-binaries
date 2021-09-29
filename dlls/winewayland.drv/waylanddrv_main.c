@@ -116,6 +116,7 @@ static void WAYLAND_ThreadDetach(void)
 
 static const struct user_driver_funcs waylanddrv_funcs =
 {
+    .pChangeDisplaySettings = WAYLAND_ChangeDisplaySettings,
     .pCreateWindow = WAYLAND_CreateWindow,
     .pDesktopWindowProc = WAYLAND_DesktopWindowProc,
     .pDestroyWindow = WAYLAND_DestroyWindow,

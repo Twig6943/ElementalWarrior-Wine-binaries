@@ -570,6 +570,8 @@ static inline HWND get_focus(void)
  *          USER driver functions
  */
 
+LONG WAYLAND_ChangeDisplaySettings(LPDEVMODEW displays, LPCWSTR primary_name,
+                                   HWND hwnd, DWORD flags, LPVOID lpvoid) DECLSPEC_HIDDEN;
 BOOL WAYLAND_CreateWindow(HWND hwnd) DECLSPEC_HIDDEN;
 LRESULT WAYLAND_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) DECLSPEC_HIDDEN;
 void WAYLAND_DestroyWindow(HWND hwnd) DECLSPEC_HIDDEN;

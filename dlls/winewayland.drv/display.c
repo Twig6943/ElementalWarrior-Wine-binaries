@@ -33,6 +33,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
+#define NEXT_DEVMODEW(mode) ((DEVMODEW *)((char *)((mode) + 1) + (mode)->dmDriverExtra))
+
 static BOOL force_display_devices_refresh;
 
 static void wayland_refresh_display_devices(void)
@@ -334,4 +336,77 @@ INT WAYLAND_GetDisplayDepth(LPCWSTR name, BOOL is_primary)
         ERR("Failed to get %s display depth, returning 32.\n", wine_dbgstr_w(name));
 
     return bpp > 0 ? bpp : 32;
+}
+
+static struct wayland_output_mode *get_matching_output_mode(struct wayland_output *output,
+                                                            LPDEVMODEW devmode)
+{
+    struct wayland_output_mode *output_mode;
+
+    wl_list_for_each(output_mode, &output->mode_list, link)
+    {
+        if (devmode->dmPelsWidth == output_mode->width &&
+            devmode->dmPelsHeight == output_mode->height &&
+            output_mode->bpp == devmode->dmBitsPerPel &&
+            output_mode->refresh / 1000 == devmode->dmDisplayFrequency)
+        {
+            return output_mode;
+        }
+    }
+
+    return NULL;
+}
+
+/***********************************************************************
+ *		ChangeDisplaySettings  (WAYLAND.@)
+ *
+ */
+LONG WAYLAND_ChangeDisplaySettings(LPDEVMODEW displays, LPCWSTR primary_name,
+                                   HWND hwnd, DWORD flags, LPVOID lpvoid)
+{
+    LONG ret;
+    struct wayland *wayland = wayland_process_acquire();
+    struct wayland_output *output;
+    struct wayland_output_mode *output_mode;
+    DEVMODEW *devmode;
+
+    for (devmode = displays; devmode->dmSize; devmode = NEXT_DEVMODEW(devmode))
+    {
+        TRACE("device=%s devmode=%ux%u@%u %ubpp\n",
+              wine_dbgstr_w(devmode->dmDeviceName), (UINT)devmode->dmPelsWidth,
+              (UINT)devmode->dmPelsHeight, (UINT)devmode->dmDisplayFrequency,
+              (UINT)devmode->dmBitsPerPel);
+
+        output = wayland_output_get_by_wine_name(wayland, devmode->dmDeviceName);
+        if (!output)
+        {
+            ret = DISP_CHANGE_BADPARAM;
+            goto out;
+        }
+
+        output_mode = get_matching_output_mode(output, devmode);
+        if (!output_mode)
+        {
+            ret = DISP_CHANGE_BADMODE;
+            goto out;
+        }
+
+        wayland_output_set_wine_mode(output, output_mode);
+
+        TRACE("output=%s (%s) set current wine mode %dx%d wine_scale %f\n",
+              output->name, wine_dbgstr_w(output->wine_name),
+              output_mode->width, output_mode->height, output->wine_scale);
+    }
+
+    /* Release the wayland process instance lock to avoid potential deadlocks
+     * while notifying other thread instances below. */
+    wayland_process_release();
+
+    wayland_notify_wine_monitor_change();
+
+    return DISP_CHANGE_SUCCESSFUL;
+
+out:
+    wayland_process_release();
+    return ret;
 }

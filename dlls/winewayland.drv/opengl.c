@@ -50,6 +50,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
 static void *egl_handle;
 static void *opengl_handle;
+static EGLDisplay egl_display;
+static EGLint egl_version[2];
+
+#define DECL_FUNCPTR(f) static __typeof__(f) * p_##f = NULL
+DECL_FUNCPTR(eglGetDisplay);
+DECL_FUNCPTR(eglInitialize);
+#undef DECL_FUNCPTR
 
 static BOOL egl_init(void)
 {
@@ -79,6 +86,21 @@ static BOOL egl_init(void)
         ERR("failed to load GL or GLESv2 library\n");
         return FALSE;
     }
+
+#define LOAD_FUNCPTR(func) do { \
+        if (!(p_##func = dlsym(egl_handle, #func))) \
+        { ERR("can't find symbol %s\n", #func); return FALSE; }    \
+    } while(0)
+    LOAD_FUNCPTR(eglGetDisplay);
+    LOAD_FUNCPTR(eglInitialize);
+#undef LOAD_FUNCPTR
+
+    if (!wayland_gbm_init()) return FALSE;
+
+    egl_display = p_eglGetDisplay((EGLNativeDisplayType) process_gbm_device);
+    if (!p_eglInitialize(egl_display, &egl_version[0], &egl_version[1]))
+        return FALSE;
+    TRACE("display %p version %u.%u\n", egl_display, egl_version[0], egl_version[1]);
 
     retval = 1;
     return TRUE;

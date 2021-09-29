@@ -1363,6 +1363,9 @@ else
     WINE_PACKAGE_FLAGS(DRM,[libdrm],,,,
         [AC_CHECK_HEADERS([drm.h])
          AC_CHECK_LIB(drm,drmPrimeHandleToFD,[:],[DRM_LIBS=""],[$DRM_LIBS])])
+    WINE_CHECK_SONAME(EGL,eglGetProcAddress)
+    WINE_CHECK_SONAME(GL,glFlush)
+    WINE_CHECK_SONAME(GLESv2,glFlush)
 fi
 WINE_NOTICE_WITH(wayland, [test -z "$WAYLAND_CLIENT_LIBS" ||
                            test -z "$WAYLAND_PROTOCOLS_DATADIR" ||

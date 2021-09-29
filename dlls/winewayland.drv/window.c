@@ -1328,7 +1328,19 @@ done:
 
 static void handle_wm_wayland_monitor_change(struct wayland *wayland)
 {
+    struct wayland_surface *surface;
+
     wayland_update_outputs_from_process(wayland);
+
+    /* Update the state of all surfaces tracked by the wayland thread instance,
+     * in case any surface was affected by the monitor changes (e.g., gained or
+     * lost the fullscreen state). We post the message instead of updating the
+     * state synchronously in order to avoid deadlocks, since:
+     * 1. Wayland state updates may involve queries to the Wine monitor info.
+     * 2. This function is expected to be called as part of our display
+     *    configuration sequence which happens under the win32u display lock. */
+    wl_list_for_each(surface, &wayland->surface_list, link)
+        NtUserPostMessage(surface->hwnd, WM_WAYLAND_STATE_UPDATE, 0, 0);
 }
 
 static void handle_wm_wayland_configure(HWND hwnd)

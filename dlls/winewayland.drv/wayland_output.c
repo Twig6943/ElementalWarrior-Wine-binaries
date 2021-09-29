@@ -614,6 +614,8 @@ void wayland_update_outputs_from_process(struct wayland *wayland)
             if (!strcmp(output->name, process_output->name))
             {
                 lstrcpyW(output->wine_name, process_output->wine_name);
+                wayland_output_set_wine_mode(output,
+                                             process_output->current_wine_mode);
                 break;
             }
         }
@@ -640,4 +642,47 @@ struct wayland_output *wayland_output_get_by_wine_name(struct wayland *wayland,
     }
 
     return NULL;
+}
+
+/**********************************************************************
+ *          wayland_output_set_wine_mode
+ *
+ * Set the current wine mode for the specified output. Note that
+ * the provided mode struct argument is used only as a reference to get
+ * mode information from.
+ */
+void wayland_output_set_wine_mode(struct wayland_output *output,
+                                  struct wayland_output_mode *ref_mode)
+{
+    struct wayland_output_mode *output_mode;
+
+    TRACE("output->name=%s %dx%d@%d %dbpp\n",
+          output->name, ref_mode->width, ref_mode->height,
+          ref_mode->refresh, ref_mode->bpp);
+
+    wl_list_for_each(output_mode, &output->mode_list, link)
+    {
+        if (output_mode->width == ref_mode->width &&
+            output_mode->height == ref_mode->height &&
+            output_mode->bpp == ref_mode->bpp &&
+            output_mode->refresh == ref_mode->refresh)
+        {
+            output->current_wine_mode = output_mode;
+            break;
+        }
+    }
+
+    if (!output->current_wine_mode || !output->current_mode)
+    {
+        output->wine_scale = 1.0;
+    }
+    else
+    {
+        double scale_x = ((double)output->current_mode->width) /
+                         output->current_wine_mode->width;
+        double scale_y = ((double)output->current_mode->height) /
+                         output->current_wine_mode->height;
+        /* We want to keep the aspect ratio of the target mode. */
+        output->wine_scale = fmin(scale_x, scale_y);
+    }
 }

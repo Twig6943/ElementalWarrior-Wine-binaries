@@ -549,7 +549,10 @@ static void wayland_win_data_update_wayland_surface(struct wayland_win_data *dat
             wl_list_for_each(child, &data->wayland_surface->child_list, parent_link)
             {
                 struct wayland_win_data *child_data;
-                if ((child_data = wayland_win_data_get(child->hwnd)))
+                /* Don't handle glvk subsurfaces here, they are updated specially
+                 * below. */
+                if (child != data->wayland_surface->glvk &&
+                    (child_data = wayland_win_data_get(child->hwnd)))
                 {
                     child_data->wayland_surface_needs_update = TRUE;
                     wayland_win_data_release(child_data);
@@ -561,6 +564,8 @@ static void wayland_win_data_update_wayland_surface(struct wayland_win_data *dat
         }
 
         data->wayland_surface = surface;
+
+        wayland_update_gl_drawable_surface(data->hwnd, data->wayland_surface);
     }
 }
 

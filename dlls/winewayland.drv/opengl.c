@@ -1742,12 +1742,36 @@ struct opengl_funcs *WAYLAND_wine_get_wgl_driver(UINT version)
     return &egl_funcs;
 }
 
+/***********************************************************************
+ *		wayland_update_gl_drawable_surface
+ */
+void wayland_update_gl_drawable_surface(HWND hwnd, struct wayland_surface *wayland_surface)
+{
+    struct wayland_gl_drawable *gl;
+
+    if ((gl = wayland_gl_drawable_get(hwnd)))
+    {
+        if (gl->wayland_surface)
+            wayland_surface_unref_glvk(gl->wayland_surface);
+
+        gl->wayland_surface = wayland_surface;
+        if (gl->wayland_surface)
+            wayland_surface_create_or_ref_glvk(gl->wayland_surface);
+
+        wayland_gl_drawable_release(gl);
+    }
+}
+
 #else /* No GL */
 
 struct opengl_funcs *WAYLAND_wine_get_wgl_driver(UINT version)
 {
     ERR("Wine Wayland was built without OpenGL support.\n");
     return NULL;
+}
+
+void wayland_update_gl_drawable_surface(HWND hwnd, struct wayland_surface *wayland_surface)
+{
 }
 
 #endif

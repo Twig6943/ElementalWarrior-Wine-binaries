@@ -1026,6 +1026,7 @@ void WAYLAND_DestroyWindow(HWND hwnd)
 
     if (!(data = wayland_win_data_get(hwnd))) return;
     wayland_clear_window_surface_last_flushed(hwnd);
+    wayland_destroy_gl_drawable(hwnd);
     wayland_win_data_destroy(data);
 }
 

@@ -598,6 +598,7 @@ struct gbm_surface *wayland_gbm_create_surface(uint32_t drm_format, int width, i
  */
 
 void wayland_update_gl_drawable_surface(HWND hwnd, struct wayland_surface *wayland_surface) DECLSPEC_HIDDEN;
+void wayland_destroy_gl_drawable(HWND hwnd) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Registry helpers

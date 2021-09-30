@@ -1706,3 +1706,48 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
     return 0;
 }
+
+/*****************************************************************************
+ *           wayland_get_client_rect_in_screen_coords
+ *
+ * On Windows, screen coordinates always have their origin at the top-left.
+ */
+void wayland_get_client_rect_in_screen_coords(HWND hwnd, RECT *client_rect)
+{
+    if (!NtUserGetClientRect(hwnd, client_rect)) goto err;
+
+    RtlSetLastWin32Error(ERROR_SUCCESS);
+    if (!NtUserMapWindowPoints(hwnd, NULL, (POINT *)client_rect, 2) &&
+        RtlGetLastWin32Error() != ERROR_SUCCESS)
+    {
+        goto err;
+    }
+
+    return;
+
+err:
+    ERR("Failed to get client rect for hwnd %p", hwnd);
+    SetRectEmpty(client_rect);
+}
+
+/*****************************************************************************
+ *           wayland_get_client_rect_in_top_left_win_coords
+ *
+ * On Windows, windows coordinates might have their origin at the top-left (LTR
+ * setups) or top-right (RTL setups) corner. This function returns the
+ * client_rect with the origin at the top-left corner.
+ */
+void wayland_get_client_rect_in_win_top_left_coords(HWND hwnd, RECT *client_rect)
+{
+    RECT window_rect;
+
+    wayland_get_client_rect_in_screen_coords(hwnd, client_rect);
+    if (!NtUserGetWindowRect(hwnd, &window_rect)) goto err;
+    if (!OffsetRect(client_rect, -window_rect.left, -window_rect.top)) goto err;
+
+    return;
+
+err:
+    ERR("Failed to get client rect for hwnd %p", hwnd);
+    SetRectEmpty(client_rect);
+}

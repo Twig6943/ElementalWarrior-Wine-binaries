@@ -509,6 +509,8 @@ size_t ascii_to_unicode_z(WCHAR *dst, size_t dst_max_chars,
                           const char *src, size_t src_max_chars) DECLSPEC_HIDDEN;
 int wayland_shmfd_create(const char *name, int size) DECLSPEC_HIDDEN;
 RGNDATA *get_region_data(HRGN region) DECLSPEC_HIDDEN;
+void wayland_get_client_rect_in_screen_coords(HWND hwnd, RECT *client_rect) DECLSPEC_HIDDEN;
+void wayland_get_client_rect_in_win_top_left_coords(HWND hwnd, RECT *client_rect) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          USER32 helpers

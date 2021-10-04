@@ -384,7 +384,12 @@ BOOL wayland_surface_commit_buffer(struct wayland_surface *surface,
  */
 void wayland_surface_destroy(struct wayland_surface *surface)
 {
+    struct wayland_pointer *pointer = &surface->wayland->pointer;
+
     TRACE("surface=%p hwnd=%p\n", surface, surface->hwnd);
+
+    if (pointer->focused_surface == surface)
+        pointer->focused_surface = NULL;
 
     if (surface->xdg_toplevel)
     {

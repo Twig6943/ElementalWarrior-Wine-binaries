@@ -65,6 +65,34 @@ static const struct xdg_wm_base_listener xdg_wm_base_listener = {
 };
 
 /**********************************************************************
+ *          Seat handling
+ */
+
+static void seat_handle_capabilities(void *data, struct wl_seat *seat,
+                                     enum wl_seat_capability caps)
+{
+    struct wayland *wayland = data;
+
+    if ((caps & WL_SEAT_CAPABILITY_POINTER) && !wayland->pointer.wl_pointer)
+    {
+        wayland_pointer_init(&wayland->pointer, wayland, wl_seat_get_pointer(seat));
+    }
+    else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && wayland->pointer.wl_pointer)
+    {
+        wayland_pointer_deinit(&wayland->pointer);
+    }
+}
+
+static void seat_handle_name(void *data, struct wl_seat *seat, const char *name)
+{
+}
+
+static const struct wl_seat_listener seat_listener = {
+    seat_handle_capabilities,
+    seat_handle_name,
+};
+
+/**********************************************************************
  *          Registry handling
  */
 
@@ -119,6 +147,12 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
     else if (strcmp(interface, "wl_shm") == 0)
     {
         wayland->wl_shm = wl_registry_bind(registry, id, &wl_shm_interface, 1);
+    }
+    else if (strcmp(interface, "wl_seat") == 0)
+    {
+        wayland->wl_seat = wl_registry_bind(registry, id, &wl_seat_interface,
+                                            version < 5 ? version : 5);
+        wl_seat_add_listener(wayland->wl_seat, &seat_listener, wayland);
     }
 }
 
@@ -267,6 +301,12 @@ void wayland_deinit(struct wayland *wayland)
     wl_list_for_each_safe(shm_buffer, shm_buffer_tmp,
                           &wayland->detached_shm_buffer_list, link)
         wayland_shm_buffer_destroy(shm_buffer);
+
+    if (wayland->pointer.wl_pointer)
+        wayland_pointer_deinit(&wayland->pointer);
+
+    if (wayland->wl_seat)
+        wl_seat_destroy(wayland->wl_seat);
 
     if (wayland->wl_shm)
         wl_shm_destroy(wayland->wl_shm);

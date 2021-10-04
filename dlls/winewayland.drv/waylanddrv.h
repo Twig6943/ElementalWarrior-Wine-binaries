@@ -81,6 +81,14 @@ struct wayland_mutex
     const char *name;
 };
 
+struct wayland_pointer
+{
+    struct wayland *wayland;
+    struct wl_pointer *wl_pointer;
+    struct wayland_surface *focused_surface;
+    uint32_t enter_serial;
+};
+
 struct wayland
 {
     struct wl_list thread_link;
@@ -94,10 +102,12 @@ struct wayland
     struct wl_subcompositor *wl_subcompositor;
     struct xdg_wm_base *xdg_wm_base;
     struct wl_shm *wl_shm;
+    struct wl_seat *wl_seat;
     struct zxdg_output_manager_v1 *zxdg_output_manager_v1;
     uint32_t next_fallback_output_id;
     struct wl_list output_list;
     struct wl_list detached_shm_buffer_list;
+    struct wayland_pointer pointer;
     DWORD last_dispatch_mask;
     BOOL processing_events;
     int event_notification_pipe[2];
@@ -342,6 +352,14 @@ BOOL wayland_window_surface_needs_flush(struct window_surface *surface) DECLSPEC
 void wayland_window_surface_update_wayland_surface(struct window_surface *surface,
                                                    struct wayland_surface *wayland_surface) DECLSPEC_HIDDEN;
 void wayland_clear_window_surface_last_flushed(HWND hwnd) DECLSPEC_HIDDEN;
+
+/**********************************************************************
+ *          Wayland Pointer
+ */
+
+void wayland_pointer_init(struct wayland_pointer *pointer, struct wayland *wayland,
+                          struct wl_pointer *wl_pointer) DECLSPEC_HIDDEN;
+void wayland_pointer_deinit(struct wayland_pointer *pointer) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Misc. helpers

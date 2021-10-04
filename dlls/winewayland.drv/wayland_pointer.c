@@ -229,12 +229,20 @@ void wayland_pointer_init(struct wayland_pointer *pointer, struct wayland *wayla
     wayland->pointer.wayland = wayland;
     wayland->pointer.wl_pointer = wl_pointer;
     wl_pointer_add_listener(wayland->pointer.wl_pointer, &pointer_listener, wayland);
+    wayland->pointer.cursor_wl_surface =
+        wl_compositor_create_surface(wayland->wl_compositor);
 }
 
 void wayland_pointer_deinit(struct wayland_pointer *pointer)
 {
     if (pointer->wl_pointer)
         wl_pointer_destroy(pointer->wl_pointer);
+
+    if (pointer->cursor_wl_surface)
+        wl_surface_destroy(pointer->cursor_wl_surface);
+
+    if (pointer->cursor)
+        wayland_cursor_destroy(pointer->cursor);
 
     memset(pointer, 0, sizeof(*pointer));
 }

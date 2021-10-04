@@ -120,6 +120,7 @@ static const struct user_driver_funcs waylanddrv_funcs =
     .pGetCurrentDisplaySettings = WAYLAND_GetCurrentDisplaySettings,
     .pGetDisplayDepth = WAYLAND_GetDisplayDepth,
     .pProcessEvents = WAYLAND_ProcessEvents,
+    .pSetCursor = WAYLAND_SetCursor,
     .pThreadDetach = WAYLAND_ThreadDetach,
     .pUpdateDisplayDevices = WAYLAND_UpdateDisplayDevices,
     .pWindowMessage = WAYLAND_WindowMessage,
@@ -134,6 +135,8 @@ static NTSTATUS waylanddrv_unix_init(void *arg)
     /* Set the user driver functions now so that they are available during
      * our initialization. We clear them on error. */
     __wine_set_user_driver(&waylanddrv_funcs, WINE_GDI_DRIVER_VERSION);
+
+    if (!wayland_init_set_cursor()) goto err;
 
     if (!wayland_process_init()) goto err;
 

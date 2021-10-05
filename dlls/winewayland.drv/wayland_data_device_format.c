@@ -26,7 +26,34 @@
 
 #include "waylanddrv.h"
 
+#include "wine/debug.h"
+
 #include "winternl.h"
+
+#include <errno.h>
+#include <unistd.h>
+
+WINE_DEFAULT_DEBUG_CHANNEL(clipboard);
+
+static void write_all(int fd, const void *buf, size_t count)
+{
+    size_t nwritten = 0;
+
+    while (nwritten < count)
+    {
+        ssize_t ret = write(fd, (const char*)buf + nwritten, count - nwritten);
+        if (ret == -1 && errno != EINTR)
+        {
+            WARN("Failed to write all data, had %zu bytes, wrote %zu bytes (errno: %d)\n",
+                 count, nwritten, errno);
+            break;
+        }
+        else if (ret > 0)
+        {
+            nwritten += ret;
+        }
+    }
+}
 
 /* Order is important. When selecting a mime-type for a clipboard format we
  * will choose the first entry that matches the specified clipboard format. */

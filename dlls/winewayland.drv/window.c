@@ -596,6 +596,8 @@ static BOOL wayland_win_data_update_wayland_xdg_state(struct wayland_win_data *d
           (int)(mi.rcMonitor.bottom - mi.rcMonitor.top),
           data->maximized, data->fullscreen, data->handling_wayland_configure_event);
 
+    wayland_surface_set_wine_output(data->wayland_surface, output);
+
     /* If we are currently handling a wayland configure event (i.e., we are
      * being called through handle_wm_wayland_configure() -> SetWindowPos()),
      * use the event configure flags directly. Otherwise try to infer the flags

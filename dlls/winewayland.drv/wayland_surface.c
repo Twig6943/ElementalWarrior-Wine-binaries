@@ -978,3 +978,24 @@ void wayland_surface_leave_output(struct wayland_surface *surface,
         wayland_surface_set_main_output(surface, origin);
     }
 }
+
+/**********************************************************************
+ *          wayland_surface_set_wine_output
+ *
+ * Sets the output which Wine considers to contain the window backed by this
+ * surface. Transiently, this may be different from the output Wayland
+ * considers to be the "main" one for this surface.
+ */
+void wayland_surface_set_wine_output(struct wayland_surface *surface,
+                                     struct wayland_output *output)
+{
+    /* Don't update non-toplevels or surfaces that already have a main output. */
+    if (!output || surface->parent || surface->main_output) return;
+
+    TRACE("surface=%p output->name=%s => output->name=%s\n",
+          surface,
+          surface->main_output ? surface->main_output->name : NULL,
+          output ? output->name : NULL);
+
+    wayland_surface_tree_set_main_output(surface, output);
+}

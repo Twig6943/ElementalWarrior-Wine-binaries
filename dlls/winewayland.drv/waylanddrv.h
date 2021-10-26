@@ -379,6 +379,8 @@ struct wayland_surface *wayland_surface_ref(struct wayland_surface *surface) DEC
 void wayland_surface_unref(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 void wayland_surface_leave_output(struct wayland_surface *surface,
                                   struct wayland_output *output) DECLSPEC_HIDDEN;
+void wayland_surface_set_wine_output(struct wayland_surface *surface,
+                                     struct wayland_output *output) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Wayland native buffer

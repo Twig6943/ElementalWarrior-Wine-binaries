@@ -104,6 +104,7 @@ struct wayland_output
     double compositor_scale; /* scale factor reported by compositor */
     double scale; /* effective wayland output scale factor for hidpi */
     char *name;
+    WCHAR wine_name[128];
     uint32_t global_id;
 };
 
@@ -165,6 +166,9 @@ BOOL wayland_output_create(struct wayland *wayland, uint32_t id, uint32_t versio
 void wayland_output_destroy(struct wayland_output *output) DECLSPEC_HIDDEN;
 void wayland_output_use_xdg_extension(struct wayland_output *output) DECLSPEC_HIDDEN;
 void wayland_notify_wine_monitor_change(void) DECLSPEC_HIDDEN;
+void wayland_update_outputs_from_process(struct wayland *wayland) DECLSPEC_HIDDEN;
+struct wayland_output *wayland_output_get_by_wine_name(struct wayland *wayland,
+                                                       LPCWSTR wine_name) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Misc. helpers

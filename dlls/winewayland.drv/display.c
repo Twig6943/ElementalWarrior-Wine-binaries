@@ -186,10 +186,20 @@ static void wayland_add_device_output(const struct gdi_device_manager *device_ma
                                       void *param, struct wayland_output *output,
                                       INT output_id)
 {
+    char buf[16];
+    int len;
+
     /* TODO: Detect and support multiple monitors per adapter (i.e., mirroring). */
     wayland_add_device_adapter(device_manager, param, output_id);
     wayland_add_device_monitor(device_manager, param, output);
     wayland_add_device_modes(device_manager, param, output);
+
+    /* Set the wine name in wayland_output so that we can look it up. */
+    len = snprintf(buf, sizeof(buf), "\\\\.\\DISPLAY%u", output_id + 1);
+    if (len > sizeof(buf)) len = sizeof(buf);
+    ascii_to_unicode_z(output->wine_name, ARRAY_SIZE(output->wine_name), buf, len);
+    TRACE("name=%s wine_name=%s\n",
+          output->name, wine_dbgstr_w(output->wine_name));
 }
 
 static struct wayland_output *wayland_get_primary_output(struct wayland *wayland)

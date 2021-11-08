@@ -51,6 +51,7 @@ BOOL WAYLAND_CreateWindow(HWND hwnd)
 
 static void handle_wm_wayland_monitor_change(struct wayland *wayland)
 {
+    wayland_update_outputs_from_process(wayland);
 }
 
 /**********************************************************************

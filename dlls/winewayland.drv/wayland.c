@@ -28,9 +28,16 @@
 
 #include "wine/debug.h"
 
+#include <stdlib.h>
+
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
 struct wl_display *process_wl_display = NULL;
+static struct wayland *process_wayland = NULL;
+static struct wayland_mutex process_wayland_mutex =
+{
+    PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP, 0, 0, __FILE__ ": process_wayland_mutex"
+};
 
 static struct wayland_mutex thread_wayland_mutex =
 {
@@ -119,14 +126,19 @@ BOOL wayland_init(struct wayland *wayland)
     /* We need three roundtrips. One to get and bind globals, one to handle all
      * initial events produced from registering the globals and one more to
      * handle potential third-order registrations. */
+    if (wayland_is_process(wayland)) wayland_process_acquire();
     wl_display_roundtrip_queue(wayland->wl_display, wayland->wl_event_queue);
     wl_display_roundtrip_queue(wayland->wl_display, wayland->wl_event_queue);
     wl_display_roundtrip_queue(wayland->wl_display, wayland->wl_event_queue);
+    if (wayland_is_process(wayland)) wayland_process_release();
 
-    /* Keep a list of all thread wayland instances. */
-    wayland_mutex_lock(&thread_wayland_mutex);
-    wl_list_insert(&thread_wayland_list, &wayland->thread_link);
-    wayland_mutex_unlock(&thread_wayland_mutex);
+    if (!wayland_is_process(wayland))
+    {
+        /* Keep a list of all thread wayland instances. */
+        wayland_mutex_lock(&thread_wayland_mutex);
+        wl_list_insert(&thread_wayland_list, &wayland->thread_link);
+        wayland_mutex_unlock(&thread_wayland_mutex);
+    }
 
     wayland->initialized = TRUE;
 
@@ -169,5 +181,43 @@ void wayland_deinit(struct wayland *wayland)
 BOOL wayland_process_init(void)
 {
     process_wl_display = wl_display_connect(NULL);
-    return process_wl_display != NULL;
+    if (!process_wl_display)
+        return FALSE;
+
+    process_wayland = calloc(1, sizeof(*process_wayland));
+    if (!process_wayland)
+        return FALSE;
+
+    return wayland_init(process_wayland);
+}
+
+/**********************************************************************
+ *          wayland_is_process
+ *
+ *  Checks whether a wayland instance is the per-process one.
+ */
+BOOL wayland_is_process(struct wayland *wayland)
+{
+    return wayland == process_wayland;
+}
+
+/**********************************************************************
+ *          wayland_process_acquire
+ *
+ *  Acquires the per-process wayland instance.
+ */
+struct wayland *wayland_process_acquire(void)
+{
+    wayland_mutex_lock(&process_wayland_mutex);
+    return process_wayland;
+}
+
+/**********************************************************************
+ *          wayland_process_release
+ *
+ *  Releases the per-process wayland instance.
+ */
+void wayland_process_release(void)
+{
+    wayland_mutex_unlock(&process_wayland_mutex);
 }

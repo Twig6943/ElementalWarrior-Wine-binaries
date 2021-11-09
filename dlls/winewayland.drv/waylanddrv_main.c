@@ -87,6 +87,7 @@ static const struct user_driver_funcs waylanddrv_funcs =
     .pDesktopWindowProc = WAYLAND_DesktopWindowProc,
     .pThreadDetach = WAYLAND_ThreadDetach,
     .pUpdateDisplayDevices = WAYLAND_UpdateDisplayDevices,
+    .pWindowMessage = WAYLAND_WindowMessage,
 };
 
 static const struct user_driver_funcs null_funcs = { 0 };

@@ -58,9 +58,48 @@ static void wayland_resize_desktop_window(void)
         send_message(NtUserGetDesktopWindow(), WM_DISPLAYCHANGE, 0, 0);
 }
 
+/* Initialize registry display settings when new display devices are added */
+static void wayland_init_registry_display_settings(void)
+{
+    DEVMODEW dm = {.dmSize = sizeof(dm)};
+    DISPLAY_DEVICEW dd = {sizeof(dd)};
+    UNICODE_STRING device_name;
+    DWORD i = 0;
+    int ret;
+
+    while (!NtUserEnumDisplayDevices(NULL, i++, &dd, 0))
+    {
+        RtlInitUnicodeString(&device_name, dd.DeviceName);
+
+        /* Skip if the device already has registry display settings */
+        if (NtUserEnumDisplaySettings(&device_name, ENUM_REGISTRY_SETTINGS, &dm, 0))
+            continue;
+
+        if (!NtUserEnumDisplaySettings(&device_name, ENUM_CURRENT_SETTINGS, &dm, 0))
+        {
+            ERR("Failed to query current display settings for %s.\n", wine_dbgstr_w(dd.DeviceName));
+            continue;
+        }
+
+        TRACE("Device %s current display mode %ux%u %ubits %uHz at %d,%d.\n",
+              wine_dbgstr_w(dd.DeviceName), (UINT)dm.dmPelsWidth, (UINT)dm.dmPelsHeight,
+              (UINT)dm.dmBitsPerPel, (UINT)dm.dmDisplayFrequency, (int)dm.dmPosition.x,
+              (int)dm.dmPosition.y);
+
+        ret = NtUserChangeDisplaySettings(&device_name, &dm, NULL,
+                                          CDS_GLOBAL | CDS_NORESET | CDS_UPDATEREGISTRY, NULL);
+        if (ret != DISP_CHANGE_SUCCESSFUL)
+        {
+            ERR("Failed to save registry display settings for %s, returned %d.\n",
+                wine_dbgstr_w(dd.DeviceName), ret);
+        }
+    }
+}
+
 void wayland_init_display_devices()
 {
     wayland_refresh_display_devices();
+    wayland_init_registry_display_settings();
     wayland_resize_desktop_window();
 }
 

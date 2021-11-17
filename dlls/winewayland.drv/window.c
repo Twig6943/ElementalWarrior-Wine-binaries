@@ -656,6 +656,78 @@ static BOOL wayland_win_data_update_wayland_xdg_state(struct wayland_win_data *d
     return TRUE;
 }
 
+static void wayland_win_data_get_rect_in_monitor(struct wayland_win_data *data,
+                                                 enum wayland_configure_flags flags,
+                                                 RECT *rect)
+{
+    HMONITOR hmonitor;
+    MONITORINFO mi;
+    RECT *area = NULL;
+
+    mi.cbSize = sizeof(mi);
+    if ((hmonitor = NtUserMonitorFromWindow(data->hwnd, MONITOR_DEFAULTTOPRIMARY)) &&
+        NtUserGetMonitorInfo(hmonitor, (MONITORINFO *)&mi))
+    {
+        if (flags & WAYLAND_CONFIGURE_FLAG_FULLSCREEN)
+            area = &mi.rcMonitor;
+        else if (flags & WAYLAND_CONFIGURE_FLAG_MAXIMIZED)
+            area = &mi.rcWork;
+    }
+
+    if (area)
+    {
+        intersect_rect(rect, area, &data->window_rect);
+        OffsetRect(rect, -data->window_rect.left, -data->window_rect.top);
+    }
+    else
+    {
+        SetRectEmpty(rect);
+    }
+}
+
+static void wayland_win_data_get_compatible_rect(struct wayland_win_data *data,
+                                                 RECT *rect)
+{
+    int width = data->window_rect.right - data->window_rect.left;
+    int height = data->window_rect.bottom - data->window_rect.top;
+    int wine_conf_width, wine_conf_height;
+    enum wayland_configure_flags conf_flags =
+        data->wayland_surface->current.configure_flags;
+
+    /* Get the window size corresponding to the Wayland surface configuration. */
+    wayland_surface_coords_to_wine(data->wayland_surface,
+                                   data->wayland_surface->current.width,
+                                   data->wayland_surface->current.height,
+                                   &wine_conf_width,
+                                   &wine_conf_height);
+
+    /* If Wayland requires a surface size smaller than what wine provides,
+     * use part of the window contents for the surface. */
+    if (((conf_flags & WAYLAND_CONFIGURE_FLAG_MAXIMIZED) ||
+         (conf_flags & WAYLAND_CONFIGURE_FLAG_FULLSCREEN)) &&
+        (width > wine_conf_width || height > wine_conf_height))
+    {
+        wayland_win_data_get_rect_in_monitor(data, conf_flags, rect);
+        /* If the window rect in the monitor is smaller than required
+         * fall back to an appropriately sized rect at the top-left. */
+        if (rect->right - rect->left < wine_conf_width ||
+            rect->bottom - rect->top < wine_conf_height)
+        {
+            SetRect(rect, 0, 0, wine_conf_width, wine_conf_height);
+        }
+        else
+        {
+            rect->right = min(rect->right, rect->left + wine_conf_width);
+            rect->bottom = min(rect->bottom, rect->top + wine_conf_height);
+        }
+        TRACE("Window is too large for wayland state, using subarea\n");
+    }
+    else
+    {
+        SetRect(rect, 0, 0, width, height);
+    }
+}
+
 static void wayland_win_data_update_wayland_surface_state(struct wayland_win_data *data)
 {
     RECT screen_rect;
@@ -701,7 +773,11 @@ static void wayland_win_data_update_wayland_surface_state(struct wayland_win_dat
     }
     else if (wsurface->xdg_surface)
     {
-        wayland_surface_reconfigure_geometry(wsurface, 0, 0, width, height);
+        RECT compat;
+        wayland_win_data_get_compatible_rect(data, &compat);
+        wayland_surface_reconfigure_geometry(wsurface, compat.left, compat.top,
+                                             compat.right - compat.left,
+                                             compat.bottom - compat.top);
     }
 
     /* Some compositors require the surface to be mapped when we have an

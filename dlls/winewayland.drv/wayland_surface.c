@@ -381,20 +381,18 @@ BOOL wayland_surface_configure_is_compatible(struct wayland_surface_configure *c
     if ((flags & mask) != (conf->configure_flags & mask))
         return FALSE;
 
-    /* The maximized state requires the configured size. */
+    /* The maximized state requires the configured size. During surface
+     * reconfiguration we can use surface geometry to provide smaller areas
+     * from larger sizes, so only smaller sizes are incompatible. */
     if ((conf->configure_flags & WAYLAND_CONFIGURE_FLAG_MAXIMIZED) &&
-        (width != conf->width || height != conf->height))
+        (width < conf->width || height < conf->height))
     {
         return FALSE;
     }
 
     /* The fullscreen state requires sizes smaller or equal to the configured
-     * size. */
-    if ((conf->configure_flags & WAYLAND_CONFIGURE_FLAG_FULLSCREEN) &&
-        (width > conf->width || height > conf->height))
-    {
-        return FALSE;
-    }
+     * size. We can provide this during surface reconfiguration using surface
+     * geometry, so we are always compatible with a fullscreen state. */
 
     return TRUE;
 }

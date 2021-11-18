@@ -229,6 +229,41 @@ err:
 }
 
 /**********************************************************************
+ *          wayland_surface_configure_is_compatible
+ *
+ * Checks whether a wayland_surface_configure object is compatible with the
+ * the provided arguments.
+ */
+BOOL wayland_surface_configure_is_compatible(struct wayland_surface_configure *conf,
+                                             int width, int height,
+                                             enum wayland_configure_flags flags)
+{
+    static int mask = WAYLAND_CONFIGURE_FLAG_MAXIMIZED |
+                      WAYLAND_CONFIGURE_FLAG_FULLSCREEN;
+
+    /* We require the same state. */
+    if ((flags & mask) != (conf->configure_flags & mask))
+        return FALSE;
+
+    /* The maximized state requires the configured size. */
+    if ((conf->configure_flags & WAYLAND_CONFIGURE_FLAG_MAXIMIZED) &&
+        (width != conf->width || height != conf->height))
+    {
+        return FALSE;
+    }
+
+    /* The fullscreen state requires sizes smaller or equal to the configured
+     * size. */
+    if ((conf->configure_flags & WAYLAND_CONFIGURE_FLAG_FULLSCREEN) &&
+        (width > conf->width || height > conf->height))
+    {
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/**********************************************************************
  *          wayland_surface_destroy
  *
  * Destroys a wayland surface.

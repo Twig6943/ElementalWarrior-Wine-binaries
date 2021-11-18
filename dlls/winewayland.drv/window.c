@@ -781,7 +781,8 @@ static void wayland_win_data_update_wayland_surface_state(struct wayland_win_dat
                                              compat.bottom - compat.top);
     }
 
-    wsurface->drawing_allowed = TRUE;
+    if (wsurface->xdg_toplevel || wsurface->wl_subsurface)
+        wsurface->drawing_allowed = TRUE;
 
     /* Some compositors require the surface to be mapped when we have an
      * ack-ed configuration. */

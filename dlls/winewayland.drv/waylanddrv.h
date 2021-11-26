@@ -265,6 +265,7 @@ void wayland_surface_make_toplevel(struct wayland_surface *surface,
                                    struct wayland_surface *parent) DECLSPEC_HIDDEN;
 void wayland_surface_make_subsurface(struct wayland_surface *surface,
                                      struct wayland_surface *parent) DECLSPEC_HIDDEN;
+void wayland_surface_clear_role(struct wayland_surface *surface) DECLSPEC_HIDDEN;
 BOOL wayland_surface_configure_is_compatible(struct wayland_surface_configure *conf,
                                              int width, int height,
                                              enum wayland_configure_flags flags) DECLSPEC_HIDDEN;

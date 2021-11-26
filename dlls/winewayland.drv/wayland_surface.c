@@ -233,6 +233,42 @@ err:
 }
 
 /**********************************************************************
+ *          wayland_surface_clear_role
+ *
+ * Clears the role related Wayland objects of a Wayland surface, making it a
+ * plain surface again. We can later assign the same role (but not a
+ * different one!) to the surface.
+ */
+void wayland_surface_clear_role(struct wayland_surface *surface)
+{
+    TRACE("surface=%p hwnd=%p\n", surface, surface->hwnd);
+
+    if (surface->xdg_toplevel)
+    {
+        xdg_toplevel_destroy(surface->xdg_toplevel);
+        surface->xdg_toplevel = NULL;
+    }
+
+    if (surface->xdg_surface)
+    {
+        xdg_surface_destroy(surface->xdg_surface);
+        surface->xdg_surface = NULL;
+    }
+
+    if (surface->wl_subsurface)
+    {
+        wl_subsurface_destroy(surface->wl_subsurface);
+        surface->wl_subsurface = NULL;
+    }
+
+    memset(&surface->pending, 0, sizeof(surface->pending));
+    memset(&surface->current, 0, sizeof(surface->current));
+
+    /* We need to unmap, otherwise future role assignments may fail. */
+    wayland_surface_unmap(surface);
+}
+
+/**********************************************************************
  *          wayland_surface_configure_is_compatible
  *
  * Checks whether a wayland_surface_configure object is compatible with the

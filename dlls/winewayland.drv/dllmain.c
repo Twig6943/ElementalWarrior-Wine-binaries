@@ -20,6 +20,8 @@
 
 #include "waylanddrv_dll.h"
 
+BOOL option_show_systray;
+
 typedef NTSTATUS (WINAPI *kernel_callback)(void *params, ULONG size);
 static const kernel_callback kernel_callbacks[] =
 {
@@ -40,6 +42,7 @@ static DWORD WINAPI wayland_read_events_thread(void *arg)
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 {
+    struct waylanddrv_unix_init_params init_params;
     DWORD tid;
     void **callback_table;
 
@@ -52,8 +55,10 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
     memcpy(callback_table + NtUserDriverCallbackFirst, kernel_callbacks,
            sizeof(kernel_callbacks));
 
-    if (WAYLANDDRV_UNIX_CALL(init, NULL))
+    if (WAYLANDDRV_UNIX_CALL(init, &init_params))
         return FALSE;
+
+    option_show_systray = init_params.option_show_systray;
 
     /* Read wayland events from a dedicated thread. */
     CreateThread(NULL, 0, wayland_read_events_thread, NULL, 0, &tid);

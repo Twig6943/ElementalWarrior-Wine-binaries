@@ -28,6 +28,7 @@
 #include "unixlib.h"
 
 #define WAYLANDDRV_UNIX_CALL(func, params) WINE_UNIX_CALL(waylanddrv_unix_func_ ## func, params)
+extern BOOL option_show_systray DECLSPEC_HIDDEN;
 
 NTSTATUS WINAPI waylanddrv_client_create_clipboard_window(void *arg, ULONG size);
 NTSTATUS WINAPI waylanddrv_client_dnd(void *params, ULONG size);

@@ -60,6 +60,7 @@ extern struct gbm_device *process_gbm_device DECLSPEC_HIDDEN;
 extern const struct user_driver_funcs waylanddrv_funcs DECLSPEC_HIDDEN;
 extern char *option_drm_device DECLSPEC_HIDDEN;
 extern enum wayland_hidpi_scaling option_hidpi_scaling DECLSPEC_HIDDEN;
+extern BOOL option_show_systray DECLSPEC_HIDDEN;
 extern BOOL option_use_system_cursors DECLSPEC_HIDDEN;
 
 /**********************************************************************

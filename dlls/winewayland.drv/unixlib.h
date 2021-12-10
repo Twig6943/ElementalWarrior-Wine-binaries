@@ -41,6 +41,11 @@ enum waylanddrv_unix_func
     waylanddrv_unix_func_count,
 };
 
+struct waylanddrv_unix_init_params
+{
+    BOOL option_show_systray;
+};
+
 struct waylanddrv_unix_clipboard_message_params
 {
     HWND hwnd;

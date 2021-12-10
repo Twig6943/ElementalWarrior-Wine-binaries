@@ -1,7 +1,7 @@
 MODULE = winewayland.drv
 UNIXLIB = winewayland.so
-IMPORTS = user32 uuid
-DELAYIMPORTS = ole32 shell32
+IMPORTS = gdi32 user32 uuid
+DELAYIMPORTS = comctl32 ole32 shell32
 UNIX_CFLAGS = $(WAYLAND_CLIENT_CFLAGS) $(WAYLAND_CURSOR_CFLAGS) $(XKBCOMMON_CFLAGS) \
               $(GBM_CFLAGS) $(UDEV_CFLAGS) $(DRM_CFLAGS)
 UNIX_LIBS = -lwin32u -lm $(WAYLAND_CLIENT_LIBS) $(WAYLAND_CURSOR_LIBS) \
@@ -16,6 +16,7 @@ C_SRCS = \
 	opengl.c \
 	options.c \
 	registry.c \
+	systray.c \
 	unicode.c \
 	vulkan.c \
 	vulkan_remote.c \

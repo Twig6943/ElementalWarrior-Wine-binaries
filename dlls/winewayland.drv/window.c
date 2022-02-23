@@ -49,6 +49,10 @@ BOOL WAYLAND_CreateWindow(HWND hwnd)
     return TRUE;
 }
 
+static void handle_wm_wayland_monitor_change(struct wayland *wayland)
+{
+}
+
 /**********************************************************************
  *           WAYLAND_DesktopWindowProc
  */
@@ -79,6 +83,9 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
     switch (msg)
     {
+    case WM_WAYLAND_MONITOR_CHANGE:
+        handle_wm_wayland_monitor_change(thread_wayland());
+        break;
     default:
         FIXME("got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (long)wp, lp);
     }

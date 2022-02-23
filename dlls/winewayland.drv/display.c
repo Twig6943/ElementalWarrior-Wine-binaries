@@ -99,6 +99,7 @@ static void wayland_init_registry_display_settings(void)
 void wayland_init_display_devices()
 {
     wayland_refresh_display_devices();
+    wayland_notify_wine_monitor_change();
     wayland_init_registry_display_settings();
     wayland_resize_desktop_window();
 }

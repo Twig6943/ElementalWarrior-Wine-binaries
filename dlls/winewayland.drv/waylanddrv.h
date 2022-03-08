@@ -28,6 +28,7 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include <wayland-client.h>
+#include <wayland-cursor.h>
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -45,6 +46,7 @@
 
 extern char *process_name DECLSPEC_HIDDEN;
 extern struct wl_display *process_wl_display DECLSPEC_HIDDEN;
+extern BOOL option_use_system_cursors DECLSPEC_HIDDEN;
 
 /**********************************************************************
   *          Internal messages and data
@@ -88,6 +90,7 @@ struct wayland_mutex
 
 struct wayland_cursor
 {
+    BOOL owns_wl_buffer;
     struct wl_buffer *wl_buffer;
     int width;
     int height;
@@ -379,6 +382,7 @@ void wayland_pointer_init(struct wayland_pointer *pointer, struct wayland *wayla
                           struct wl_pointer *wl_pointer) DECLSPEC_HIDDEN;
 void wayland_pointer_deinit(struct wayland_pointer *pointer) DECLSPEC_HIDDEN;
 void wayland_cursor_destroy(struct wayland_cursor *wayland_cursor) DECLSPEC_HIDDEN;
+void wayland_cursor_theme_init(struct wayland *wayland) DECLSPEC_HIDDEN;
 void wayland_pointer_update_cursor_from_win32(struct wayland_pointer *pointer,
                                               HCURSOR handle) DECLSPEC_HIDDEN;
 BOOL wayland_init_set_cursor(void) DECLSPEC_HIDDEN;

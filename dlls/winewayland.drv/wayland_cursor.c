@@ -41,8 +41,139 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
+static struct wl_cursor_theme *cursor_theme = NULL;
+
 static HCURSOR last_cursor;
 static HCURSOR invalid_cursor;
+
+/* Mapping between Windows cursors and native Wayland cursors
+ *
+ * Note that we have multiple possible names for each Wayland cursor. This
+ * happens because the names for each cursor may vary across different themes.
+ *
+ * This table was created based on the docs below.
+ *
+ * https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-loadcursora
+ * https://bugs.kde.org/attachment.cgi?id=67313
+ */
+static const char *idc_appstarting[] = {"half-busy", "progress", "left_ptr_watch",
+                                        "00000000000000020006000e7e9ffc3f",
+                                        "08e8e1c95fe2fc01f976f1e063a24ccd",
+                                        "3ecb610c1bf2410f44200f48c40d3599",
+                                        "9116a3ea924ed2162ecab71ba103b17f"};
+static const char *idc_arrow[] = {"default", "left_ptr",
+                                  "top_left_arrow", "left-arrow"};
+static const char *idc_cross[] = {"crosshair"};
+static const char *idc_hand[] = {"pointing_hand", "pointer", "hand", "hand2"};
+static const char *idc_help[] = {"help", "question_arrow", "whats_this",
+                                 "5c6cd98b3f3ebcb1f9c7f1c204630408",
+                                 "d9ce0ab605698f320427677b458ad60b"};
+static const char *idc_ibeam[] = {"text", "ibeam", "xterm"};
+static const char *idc_icon[] = {"icon"};
+static const char *idc_no[] = {"forbidden", "not-allowed"};
+static const char *idc_pen[] = {"pencil"};
+static const char *idc_sizeall[] = {"size_all"};
+static const char *idc_sizenesw[] = {"nesw-resize", "size_bdiag",
+                                     "50585d75b494802d0151028115016902",
+                                     "fcf1c3c7cd4491d801f1e1c78f100000"};
+static const char *idc_sizens[] = {"ns-resize", "size_ver", "v_double_arrow",
+                                   "00008160000006810000408080010102"};
+static const char *idc_sizenwse[] = {"nwse-resize", "size_fdiag",
+                                     "38c5dff7c7b8962045400281044508d2",
+                                     "c7088f0f3e6c8088236ef8e1e3e70000"};
+static const char *idc_sizewe[] = {"ew-resize", "size_hor", "h_double_arrow",
+                                   "028006030e0e7ebffc7f7070c0600140"};
+static const char *idc_uparrow[] = {"up_arrow"};
+static const char *idc_wait[] = {"wait", "watch",
+                                 "0426c94ea35c87780ff01dc239897213"};
+
+static struct wl_cursor *_wl_cursor_from_wine_cursor(struct wl_cursor_theme *wl_cursor_theme,
+                                                     unsigned long int wine_cursor_enum)
+{
+    unsigned int i, count;
+    static const char **cursors;
+    struct wl_cursor *cursor;
+
+    switch(wine_cursor_enum)
+    {
+        case IDC_APPSTARTING:
+            cursors = idc_appstarting;
+            count = ARRAY_SIZE(idc_appstarting);
+            break;
+        case IDC_ARROW:
+            cursors = idc_arrow;
+            count = ARRAY_SIZE(idc_arrow);
+            break;
+        case IDC_CROSS:
+            cursors = idc_cross;
+            count = ARRAY_SIZE(idc_cross);
+            break;
+        case IDC_HAND:
+            cursors = idc_hand;
+            count = ARRAY_SIZE(idc_hand);
+            break;
+        case IDC_HELP:
+            cursors = idc_help;
+            count = ARRAY_SIZE(idc_help);
+            break;
+        case IDC_IBEAM:
+            cursors = idc_ibeam;
+            count = ARRAY_SIZE(idc_ibeam);
+            break;
+        case IDC_ICON:
+            cursors = idc_icon;
+            count = ARRAY_SIZE(idc_icon);
+            break;
+        case IDC_NO:
+            cursors = idc_no;
+            count = ARRAY_SIZE(idc_no);
+            break;
+        case IDC_PEN:
+            cursors = idc_pen;
+            count = ARRAY_SIZE(idc_pen);
+            break;
+        case IDC_SIZE:
+        case IDC_SIZEALL:
+            cursors = idc_sizeall;
+            count = ARRAY_SIZE(idc_sizeall);
+            break;
+        case IDC_SIZENESW:
+            cursors = idc_sizenesw;
+            count = ARRAY_SIZE(idc_sizenesw);
+            break;
+        case IDC_SIZENS:
+            cursors = idc_sizens;
+            count = ARRAY_SIZE(idc_sizens);
+            break;
+        case IDC_SIZENWSE:
+            cursors = idc_sizenwse;
+            count = ARRAY_SIZE(idc_sizenwse);
+            break;
+        case IDC_SIZEWE:
+            cursors = idc_sizewe;
+            count = ARRAY_SIZE(idc_sizewe);
+            break;
+        case IDC_UPARROW:
+            cursors = idc_uparrow;
+            count = ARRAY_SIZE(idc_uparrow);
+            break;
+        case IDC_WAIT:
+            cursors = idc_wait;
+            count = ARRAY_SIZE(idc_wait);
+            break;
+        default:
+            return NULL;
+    }
+
+    for (i = 0; i < count; i++)
+    {
+        cursor = wl_cursor_theme_get_cursor(wl_cursor_theme, cursors[i]);
+        if (cursor)
+            return cursor;
+    }
+
+    return NULL;
+}
 
 /***********************************************************************
  *           get_icon_info
@@ -199,6 +330,103 @@ failed:
     return NULL;
 }
 
+/***********************************************************************
+ *           get_wine_cursor_size
+ *
+ * We use the Wine cursor IDC_ARROW to compute the size that we should use in
+ * the Wayland native cursors. The bitmap usually does not have the same
+ * dimensions of the icon, as it uses a margin. So we take the IDC_ARROW and
+ * compute its height.
+ */
+static int get_wine_cursor_size(struct wayland *wayland)
+{
+    HCURSOR handle = NULL;
+    ICONINFOEXW info = { 0 };
+    struct wayland_shm_buffer *shm_buffer = NULL;
+    unsigned int *pixels, *row, p, x, y;
+    int first_non_empty_line = -1, last_non_empty_line = -1;
+
+    handle = LoadImageW(0, (const WCHAR *)IDC_ARROW, IMAGE_CURSOR, 0, 0,
+                        LR_SHARED | LR_DEFAULTSIZE);
+    if (!handle)
+        goto out;
+
+    if (!get_icon_info(handle, &info))
+        goto out;
+
+    if (info.hbmColor)
+    {
+        HDC hdc = NtGdiCreateCompatibleDC(0);
+        shm_buffer = create_color_cursor_buffer(wayland, hdc,
+                                                info.hbmColor, info.hbmMask);
+        NtGdiDeleteObjectApp(hdc);
+    }
+    else
+    {
+        shm_buffer = create_mono_cursor_buffer(wayland, info.hbmMask);
+    }
+
+    if (!shm_buffer)
+        goto out;
+
+    pixels = (unsigned int *) shm_buffer->map_data;
+
+    /* Compute the height of the IDC_ARROW */
+    for (y = 0; y < shm_buffer->height; y++)
+    {
+        row = (unsigned int *)((unsigned char *)pixels + y * shm_buffer->stride);
+        for (x = 0; x < shm_buffer->width; x++)
+        {
+            p = row[x];
+            /* alpha 0 means fully transparent, so no content in the
+             * pixel - any other pixel we consider content */
+            if ((p & 0xff000000) == 0)
+                continue;
+            /* it's the first time that we find a content pixel, so we set
+             * the first non empty line variable accordingly */
+            if (first_non_empty_line == -1)
+                first_non_empty_line = y;
+            /* we found a content pixel in a line, so update the latest line
+             * that does have content */
+            last_non_empty_line = y;
+            /* we don't care about the other pixels of the line if we have
+             * already found a content pixel on it */
+            break;
+        }
+    }
+
+out:
+    if (handle) NtUserDestroyCursor(handle, 0);
+    if (info.hbmMask) NtGdiDeleteObjectApp(info.hbmMask);
+    if (info.hbmColor) NtGdiDeleteObjectApp(info.hbmColor);
+    if (shm_buffer) wayland_shm_buffer_destroy(shm_buffer);
+
+    if (first_non_empty_line == -1 || last_non_empty_line == -1)
+        return -1;
+
+    return (last_non_empty_line - first_non_empty_line + 1);
+}
+
+void wayland_cursor_theme_init(struct wayland *wayland)
+{
+    char *theme;
+    int size;
+
+    if (!wayland->wl_shm)
+        return;
+
+    size = get_wine_cursor_size(wayland);
+    if (size <= 0)
+       return;
+
+    /* Some compositors set this env var, others don't. But that's fine, if we
+     * call wl_cursor_theme_load() with theme == NULL it will fallback and try
+     * to load the default system theme. */
+    theme = getenv("XCURSOR_THEME");
+
+    cursor_theme = wl_cursor_theme_load(theme, size, wayland->wl_shm);
+}
+
 static struct wayland_cursor *wayland_cursor_from_win32(struct wayland_pointer *pointer,
                                                         HCURSOR handle)
 {
@@ -213,44 +441,88 @@ static struct wayland_cursor *wayland_cursor_from_win32(struct wayland_pointer *
 
     if (!get_icon_info(handle, &info)) goto out;
 
-    if (info.hbmColor)
+    /* First try to get the native Wayland cursor (if the config option is set
+     * and the per-process Wayland instance was able to load the theme) */
+    if (option_use_system_cursors && cursor_theme)
     {
-        HDC hdc = NtGdiCreateCompatibleDC(0);
-        shm_buffer = create_color_cursor_buffer(pointer->wayland, hdc,
-                                                info.hbmColor, info.hbmMask);
-        NtGdiDeleteObjectApp(hdc);
-    }
-    else
-    {
-        shm_buffer = create_mono_cursor_buffer(pointer->wayland, info.hbmMask);
+        struct wl_cursor_image *wl_cursor_image;
+        struct wl_cursor *wl_cursor;
+
+        wayland_cursor->owns_wl_buffer = FALSE;
+        wl_cursor = _wl_cursor_from_wine_cursor(cursor_theme, MAKEINTRESOURCE(info.wResID));
+        if (wl_cursor && wl_cursor->image_count > 0)
+        {
+            /* TODO: add animated cursor support
+             * cursor->images[i] for i > 0 is only used by animations. */
+            wl_cursor_image = wl_cursor->images[0];
+            wayland_cursor->wl_buffer = wl_cursor_image_get_buffer(wl_cursor_image);
+            if (wayland_cursor->wl_buffer)
+            {
+                wayland_cursor->width = wl_cursor_image->width;
+                wayland_cursor->height = wl_cursor_image->height;
+
+                if (pointer->focused_surface)
+                {
+                    wayland_surface_coords_rounded_from_wine(pointer->focused_surface,
+                                                             wl_cursor_image->hotspot_x,
+                                                             wl_cursor_image->hotspot_y,
+                                                             &wayland_cursor->hotspot_x,
+                                                             &wayland_cursor->hotspot_y);
+                }
+                else
+                {
+                    wayland_cursor->hotspot_x = wl_cursor_image->hotspot_x;
+                    wayland_cursor->hotspot_y = wl_cursor_image->hotspot_y;
+                }
+            }
+        }
     }
 
-    if (!shm_buffer) goto out;
-
-    wayland_cursor->width = shm_buffer->width;
-    wayland_cursor->height = shm_buffer->height;
-    wayland_cursor->wl_buffer =
-        wayland_shm_buffer_steal_wl_buffer_and_destroy(shm_buffer);
-
-    /* make sure hotspot is valid */
-    if (info.xHotspot >= wayland_cursor->width ||
-        info.yHotspot >= wayland_cursor->height)
+    /* If we couldn't get native Wayland cursor (or we didn't even try,
+     * because the config to use it was not set), we copy the Wine cursor
+     * content to a wl_buffer */
+    if (!wayland_cursor->wl_buffer)
     {
-        info.xHotspot = wayland_cursor->width / 2;
-        info.yHotspot = wayland_cursor->height / 2;
-    }
+        wayland_cursor->owns_wl_buffer = TRUE;
+        if (info.hbmColor)
+        {
+            HDC hdc = NtGdiCreateCompatibleDC(0);
+            shm_buffer = create_color_cursor_buffer(pointer->wayland, hdc,
+                                                    info.hbmColor, info.hbmMask);
+            NtGdiDeleteObjectApp(hdc);
+        }
+        else
+        {
+            shm_buffer = create_mono_cursor_buffer(pointer->wayland, info.hbmMask);
+        }
 
-    if (pointer->focused_surface)
-    {
-        wayland_surface_coords_rounded_from_wine(pointer->focused_surface,
-                                                 info.xHotspot, info.yHotspot,
-                                                 &wayland_cursor->hotspot_x,
-                                                 &wayland_cursor->hotspot_y);
-    }
-    else
-    {
-        wayland_cursor->hotspot_x = info.xHotspot;
-        wayland_cursor->hotspot_y = info.yHotspot;
+        if (!shm_buffer) goto out;
+
+        wayland_cursor->width = shm_buffer->width;
+        wayland_cursor->height = shm_buffer->height;
+        wayland_cursor->wl_buffer =
+            wayland_shm_buffer_steal_wl_buffer_and_destroy(shm_buffer);
+
+        /* make sure hotspot is valid */
+        if (info.xHotspot >= wayland_cursor->width ||
+            info.yHotspot >= wayland_cursor->height)
+        {
+            info.xHotspot = wayland_cursor->width / 2;
+            info.yHotspot = wayland_cursor->height / 2;
+        }
+
+        if (pointer->focused_surface)
+        {
+            wayland_surface_coords_rounded_from_wine(pointer->focused_surface,
+                                                    info.xHotspot, info.yHotspot,
+                                                    &wayland_cursor->hotspot_x,
+                                                    &wayland_cursor->hotspot_y);
+        }
+        else
+        {
+            wayland_cursor->hotspot_x = info.xHotspot;
+            wayland_cursor->hotspot_y = info.yHotspot;
+        }
     }
 
 out:
@@ -275,7 +547,13 @@ void wayland_cursor_destroy(struct wayland_cursor *wayland_cursor)
         return;
 
     if (wayland_cursor->wl_buffer)
-        wl_buffer_destroy(wayland_cursor->wl_buffer);
+    {
+        /* When using Wayland native cursors, we get the cursor wl_buffer from
+         * using wl_cursor_image_get_buffer(). In such case, the compositor owns
+         * the wl_buffer instead of us. So we should not destroy it. */
+        if (wayland_cursor->owns_wl_buffer)
+            wl_buffer_destroy(wayland_cursor->wl_buffer);
+    }
 
     free(wayland_cursor);
 }

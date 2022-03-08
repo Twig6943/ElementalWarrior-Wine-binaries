@@ -702,6 +702,8 @@ INOTIFY_LIBS
 INOTIFY_CFLAGS
 PCSCLITE_LIBS
 PCAP_LIBS
+WAYLAND_CURSOR_LIBS
+WAYLAND_CURSOR_CFLAGS
 WAYLAND_SCANNER
 WAYLAND_PROTOCOLS_DATADIR
 WAYLAND_PROTOCOLS_LIBS
@@ -1756,6 +1758,8 @@ WAYLAND_CLIENT_CFLAGS
 WAYLAND_CLIENT_LIBS
 WAYLAND_PROTOCOLS_CFLAGS
 WAYLAND_PROTOCOLS_LIBS
+WAYLAND_CURSOR_CFLAGS
+WAYLAND_CURSOR_LIBS
 INOTIFY_CFLAGS
 INOTIFY_LIBS
 DBUS_CFLAGS
@@ -2569,6 +2573,10 @@ Some influential environment variables:
               C compiler flags for wayland-protocols, overriding pkg-config
   WAYLAND_PROTOCOLS_LIBS
               Linker flags for wayland-protocols, overriding pkg-config
+  WAYLAND_CURSOR_CFLAGS
+              C compiler flags for wayland-cursor, overriding pkg-config
+  WAYLAND_CURSOR_LIBS
+              Linker flags for wayland-cursor, overriding pkg-config
   INOTIFY_CFLAGS
               C compiler flags for libinotify, overriding pkg-config
   INOTIFY_LIBS
@@ -15730,10 +15738,89 @@ printf "%s\n" "no" >&6; }
 fi
 
 
+    rm -f conftest.err
+if ${WAYLAND_CURSOR_CFLAGS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  WAYLAND_CURSOR_CFLAGS=`$PKG_CONFIG --cflags wayland-cursor 2>conftest.err`
+fi
+fi
+
+if ${WAYLAND_CURSOR_LIBS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  WAYLAND_CURSOR_LIBS=`$PKG_CONFIG --libs wayland-cursor 2>/dev/null`
+fi
+fi
+
+
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: wayland-cursor cflags: $WAYLAND_CURSOR_CFLAGS" >&5
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: wayland-cursor libs: $WAYLAND_CURSOR_LIBS" >&5
+if test -s conftest.err; then
+     printf %s "$as_me:${as_lineno-$LINENO}: wayland-cursor errors: " >&5
+     cat conftest.err >&5
+fi
+rm -f conftest.err
+ac_save_CPPFLAGS=$CPPFLAGS
+CPPFLAGS="$CPPFLAGS $WAYLAND_CURSOR_CFLAGS"
+ac_fn_c_check_header_compile "$LINENO" "wayland-cursor.h" "ac_cv_header_wayland_cursor_h" "$ac_includes_default"
+if test "x$ac_cv_header_wayland_cursor_h" = xyes
+then :
+  printf "%s\n" "#define HAVE_WAYLAND_CURSOR_H 1" >>confdefs.h
+
+fi
+
+         { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for wl_cursor_theme_load in -lwayland-cursor" >&5
+printf %s "checking for wl_cursor_theme_load in -lwayland-cursor... " >&6; }
+if test ${ac_cv_lib_wayland_cursor_wl_cursor_theme_load+y}
+then :
+  printf %s "(cached) " >&6
+else $as_nop
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lwayland-cursor $WAYLAND_CURSOR_LIBS $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+char wl_cursor_theme_load ();
+int
+main (void)
+{
+return wl_cursor_theme_load ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_wayland_cursor_wl_cursor_theme_load=yes
+else $as_nop
+  ac_cv_lib_wayland_cursor_wl_cursor_theme_load=no
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_wayland_cursor_wl_cursor_theme_load" >&5
+printf "%s\n" "$ac_cv_lib_wayland_cursor_wl_cursor_theme_load" >&6; }
+if test "x$ac_cv_lib_wayland_cursor_wl_cursor_theme_load" = xyes
+then :
+  :
+else $as_nop
+  WAYLAND_CURSOR_LIBS=""
+fi
+
+CPPFLAGS=$ac_save_CPPFLAGS
+
 fi
 if test -z "$WAYLAND_CLIENT_LIBS" ||
                            test -z "$WAYLAND_PROTOCOLS_DATADIR" ||
-                           test -z "$WAYLAND_SCANNER"
+                           test -z "$WAYLAND_SCANNER" ||
+                           test -z "$WAYLAND_CURSOR_LIBS"
 then :
   case "x$with_wayland" in
   x)   as_fn_append wine_notices "|Wayland ${notice_platform}development files not found or not new enough, the Wayland driver won't be supported." ;;
@@ -23241,6 +23328,8 @@ WAYLAND_PROTOCOLS_CFLAGS = $WAYLAND_PROTOCOLS_CFLAGS
 WAYLAND_PROTOCOLS_LIBS = $WAYLAND_PROTOCOLS_LIBS
 WAYLAND_PROTOCOLS_DATADIR = $WAYLAND_PROTOCOLS_DATADIR
 WAYLAND_SCANNER = $WAYLAND_SCANNER
+WAYLAND_CURSOR_CFLAGS = $WAYLAND_CURSOR_CFLAGS
+WAYLAND_CURSOR_LIBS = $WAYLAND_CURSOR_LIBS
 PCAP_LIBS = $PCAP_LIBS
 PCSCLITE_LIBS = $PCSCLITE_LIBS
 INOTIFY_CFLAGS = $INOTIFY_CFLAGS

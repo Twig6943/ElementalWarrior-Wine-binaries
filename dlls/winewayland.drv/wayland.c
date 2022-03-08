@@ -121,8 +121,13 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
         wl_list_for_each(output, &wayland->output_list, link)
             wayland_output_use_xdg_extension(output);
     }
+    else if (strcmp(interface, "wl_shm") == 0)
+    {
+        wayland->wl_shm = wl_registry_bind(registry, id, &wl_shm_interface, 1);
+    }
 
-    /* The per-process wayland instance only handles output related globals. */
+    /* The per-process wayland instance only handles output related
+     * and wl_shm globals. */
     if (wayland_is_process(wayland)) return;
 
     if (strcmp(interface, "wl_compositor") == 0)
@@ -143,10 +148,6 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
             wl_registry_bind(registry, id, &xdg_wm_base_interface,
                              version < 2 ? version : 2);
         xdg_wm_base_add_listener(wayland->xdg_wm_base, &xdg_wm_base_listener, wayland);
-    }
-    else if (strcmp(interface, "wl_shm") == 0)
-    {
-        wayland->wl_shm = wl_registry_bind(registry, id, &wl_shm_interface, 1);
     }
     else if (strcmp(interface, "wl_seat") == 0)
     {
@@ -251,7 +252,12 @@ BOOL wayland_init(struct wayland *wayland)
     wl_display_roundtrip_queue(wayland->wl_display, wayland->wl_event_queue);
     if (wayland_is_process(wayland)) wayland_process_release();
 
-    if (!wayland_is_process(wayland))
+    if (wayland_is_process(wayland))
+    {
+        if (option_use_system_cursors)
+            wayland_cursor_theme_init(wayland);
+    }
+    else
     {
         /* Thread wayland instances have notification pipes to inform them when
          * there might be new events in their queues. The read part of the pipe

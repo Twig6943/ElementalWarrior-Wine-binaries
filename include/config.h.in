@@ -648,6 +648,9 @@
 /* Define to 1 if you have the <wayland-client.h> header file. */
 #undef HAVE_WAYLAND_CLIENT_H
 
+/* Define to 1 if you have the <wayland-cursor.h> header file. */
+#undef HAVE_WAYLAND_CURSOR_H
+
 /* Define to 1 if you have the <X11/extensions/shape.h> header file. */
 #undef HAVE_X11_EXTENSIONS_SHAPE_H
 

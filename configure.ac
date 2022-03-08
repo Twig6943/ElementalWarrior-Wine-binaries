@@ -1350,10 +1350,15 @@ else
                    `$PKG_CONFIG --atleast-version=1.14 wayland-protocols && $PKG_CONFIG --variable=pkgdatadir wayland-protocols`)])
     AC_PATH_PROG(WAYLAND_SCANNER,wayland-scanner,
                  [`$PKG_CONFIG --variable=wayland_scanner wayland-scanner`])
+    WINE_PACKAGE_FLAGS(WAYLAND_CURSOR,[wayland-cursor],,,,
+        [AC_CHECK_HEADERS([wayland-cursor.h])
+         AC_CHECK_LIB(wayland-cursor,wl_cursor_theme_load,[:],
+                      [WAYLAND_CURSOR_LIBS=""],[$WAYLAND_CURSOR_LIBS])])
 fi
 WINE_NOTICE_WITH(wayland, [test -z "$WAYLAND_CLIENT_LIBS" ||
                            test -z "$WAYLAND_PROTOCOLS_DATADIR" ||
-                           test -z "$WAYLAND_SCANNER"],
+                           test -z "$WAYLAND_SCANNER" ||
+                           test -z "$WAYLAND_CURSOR_LIBS"],
                  [Wayland ${notice_platform}development files not found or not new enough, the Wayland driver won't be supported.],
                  [enable_winewayland_drv])
 

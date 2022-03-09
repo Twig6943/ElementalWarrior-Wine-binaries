@@ -39,6 +39,7 @@
 #include "waylanddrv.h"
 
 #include "wine/debug.h"
+#include "wine/server.h"
 
 #include "ntuser.h"
 
@@ -604,6 +605,110 @@ static struct xkb_state *_xkb_state_new_from_wine(struct wayland_keyboard *keybo
     return xkb_state;
 }
 
+static BOOL get_wine_async_key_state(BYTE state[256])
+{
+    BOOL ret;
+
+    SERVER_START_REQ(get_key_state)
+    {
+        req->async = 1;
+        req->key = -1;
+        wine_server_set_reply(req, state, 256);
+        ret = !wine_server_call(req);
+    }
+    SERVER_END_REQ;
+    return ret;
+}
+
+static void set_wine_async_key_state(const BYTE state[256])
+{
+    SERVER_START_REQ(set_key_state)
+    {
+        req->async = 1;
+        wine_server_add_data(req, state, 256);
+        wine_server_call(req);
+    }
+    SERVER_END_REQ;
+}
+
+static void update_wine_key_state(BYTE *keystate, WORD vkey, int down, int lock)
+{
+    BYTE old_state = keystate[vkey];
+
+    if (down == 1) keystate[vkey] |= 0x80;
+    else if (down == 0) keystate[vkey] &= ~0x80;
+
+    if (lock == 1) keystate[vkey] |= 0x01;
+    else if (lock == 0) keystate[vkey] &= ~0x01;
+
+    if (TRACE_ON(keyboard) && keystate[vkey] != old_state)
+    {
+        TRACE("vkey=%s down=%d lock=%d state=0x%02x=>0x%02x\n",
+              vkey_to_name(vkey), down, lock, old_state, keystate[vkey]);
+    }
+}
+
+static void update_wine_lock_state(struct wayland_keyboard *keyboard)
+{
+    BYTE keystate[256];
+    struct { const char *modname; WORD vkeys[3]; } mods[] = {
+        { XKB_MOD_NAME_ALT,   { VK_MENU, VK_LMENU, VK_RMENU } },
+        { XKB_MOD_NAME_CTRL,  { VK_CONTROL, VK_LCONTROL, VK_RCONTROL } },
+        { XKB_MOD_NAME_SHIFT, { VK_SHIFT, VK_LSHIFT, VK_RSHIFT } },
+        { XKB_MOD_NAME_CAPS,  { VK_CAPITAL } },
+        { XKB_MOD_NAME_NUM,   { VK_NUMLOCK } },
+    };
+
+    if (!get_wine_async_key_state(keystate)) return;
+
+    for (int i = 0; i < ARRAY_SIZE(mods); i++)
+    {
+        WORD *vkey;
+        BOOL locked = xkb_state_mod_name_is_active(keyboard->xkb_state,
+                                                   mods[i].modname,
+                                                   XKB_STATE_MODS_LOCKED);
+
+        for (vkey = mods[i].vkeys; *vkey; vkey++)
+            update_wine_key_state(keystate, *vkey, -1, locked);
+    }
+
+    update_wine_key_state(keystate, VK_SCROLL, -1,
+                          xkb_state_led_name_is_active(keyboard->xkb_state,
+                                                       XKB_LED_NAME_SCROLL));
+
+    set_wine_async_key_state(keystate);
+}
+
+static void update_wine_pressed_state(struct wayland_keyboard *keyboard,
+                                      struct wl_array *pressed_keys)
+{
+    uint32_t *key;
+    BYTE keystate[256];
+    int pressed[256] = { 0 };
+
+    if (!get_wine_async_key_state(keystate)) return;
+
+    wl_array_for_each(key, pressed_keys)					\
+    {
+        xkb_keycode_t xkb_keycode = linux_input_keycode_to_xkb(*key);
+        UINT vkey = translate_xkb_keycode_to_vkey(keyboard, xkb_keycode);
+        pressed[vkey & 0xff] = 1;
+    }
+
+    for (WORD vkey = 0; vkey < 256; vkey++)
+        update_wine_key_state(keystate, vkey, pressed[vkey], -1);
+
+    /* Update special left/right-agnostic vkeys */
+    update_wine_key_state(keystate, VK_CONTROL,
+                          (keystate[VK_LCONTROL] | keystate[VK_RCONTROL]) & 0x80, -1);
+    update_wine_key_state(keystate, VK_MENU,
+                          (keystate[VK_LMENU] | keystate[VK_RMENU]) & 0x80, -1);
+    update_wine_key_state(keystate, VK_SHIFT,
+                          (keystate[VK_LSHIFT] | keystate[VK_RSHIFT]) & 0x80, -1);
+
+    set_wine_async_key_state(keystate);
+}
+
 /**********************************************************************
  *          Keyboard handling
  */
@@ -729,6 +834,8 @@ static void keyboard_handle_enter(void *data, struct wl_keyboard *keyboard,
             while (toplevel->parent) toplevel = toplevel->parent;
             NtUserSetForegroundWindow(toplevel->hwnd);
         }
+
+        update_wine_pressed_state(&wayland->keyboard, keys);
     }
 }
 
@@ -863,7 +970,10 @@ static void keyboard_handle_modifiers(void *data, struct wl_keyboard *keyboard,
     if (group != last_group)
         wayland_keyboard_update_layout(&wayland->keyboard);
 
-    /* TODO: Sync wine modifier state with XKB modifier state. */
+    /* Update the wine lock key state, in case the XKB modifier state is set
+     * without previously sending the associated key events (e.g., while another
+     * window has the focus). */
+    update_wine_lock_state(&wayland->keyboard);
 }
 
 static void keyboard_handle_repeat_info(void *data, struct wl_keyboard *keyboard,

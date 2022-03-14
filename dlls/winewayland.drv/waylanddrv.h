@@ -108,6 +108,17 @@ struct wayland_output
     uint32_t global_id;
 };
 
+struct wayland_native_buffer
+{
+    int plane_count;
+    int fds[4];
+    uint32_t strides[4];
+    uint32_t offsets[4];
+    uint32_t width, height;
+    uint32_t format;
+    uint64_t modifier;
+};
+
 /**********************************************************************
  *          Wayland thread data
  */
@@ -175,6 +186,12 @@ struct wayland_output *wayland_output_get_by_wine_name(struct wayland *wayland,
  */
 
 int wayland_dispatch_queue(struct wl_event_queue *queue, int timeout_ms) DECLSPEC_HIDDEN;
+
+/**********************************************************************
+ *          Wayland native buffer
+ */
+
+void wayland_native_buffer_deinit(struct wayland_native_buffer *native) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Misc. helpers

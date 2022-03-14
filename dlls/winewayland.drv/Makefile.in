@@ -9,6 +9,7 @@ C_SRCS = \
 	unicode.c \
 	wayland.c \
 	wayland_mutex.c \
+	wayland_native_buffer.c \
 	wayland_output.c \
 	waylanddrv_main.c \
 	window.c \

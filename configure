@@ -702,6 +702,8 @@ INOTIFY_LIBS
 INOTIFY_CFLAGS
 PCSCLITE_LIBS
 PCAP_LIBS
+DRM_LIBS
+DRM_CFLAGS
 XKBCOMMON_LIBS
 XKBCOMMON_CFLAGS
 WAYLAND_CURSOR_LIBS
@@ -1764,6 +1766,8 @@ WAYLAND_CURSOR_CFLAGS
 WAYLAND_CURSOR_LIBS
 XKBCOMMON_CFLAGS
 XKBCOMMON_LIBS
+DRM_CFLAGS
+DRM_LIBS
 INOTIFY_CFLAGS
 INOTIFY_LIBS
 DBUS_CFLAGS
@@ -2585,6 +2589,8 @@ Some influential environment variables:
               C compiler flags for xkbcommon, overriding pkg-config
   XKBCOMMON_LIBS
               Linker flags for xkbcommon, overriding pkg-config
+  DRM_CFLAGS  C compiler flags for libdrm, overriding pkg-config
+  DRM_LIBS    Linker flags for libdrm, overriding pkg-config
   INOTIFY_CFLAGS
               C compiler flags for libinotify, overriding pkg-config
   INOTIFY_LIBS
@@ -15902,12 +15908,91 @@ fi
 
 CPPFLAGS=$ac_save_CPPFLAGS
 
+    rm -f conftest.err
+if ${DRM_CFLAGS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  DRM_CFLAGS=`$PKG_CONFIG --cflags libdrm 2>conftest.err`
+fi
+fi
+
+if ${DRM_LIBS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  DRM_LIBS=`$PKG_CONFIG --libs libdrm 2>/dev/null`
+fi
+fi
+
+
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: libdrm cflags: $DRM_CFLAGS" >&5
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: libdrm libs: $DRM_LIBS" >&5
+if test -s conftest.err; then
+     printf %s "$as_me:${as_lineno-$LINENO}: libdrm errors: " >&5
+     cat conftest.err >&5
+fi
+rm -f conftest.err
+ac_save_CPPFLAGS=$CPPFLAGS
+CPPFLAGS="$CPPFLAGS $DRM_CFLAGS"
+ac_fn_c_check_header_compile "$LINENO" "drm.h" "ac_cv_header_drm_h" "$ac_includes_default"
+if test "x$ac_cv_header_drm_h" = xyes
+then :
+  printf "%s\n" "#define HAVE_DRM_H 1" >>confdefs.h
+
+fi
+
+         { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for drmPrimeHandleToFD in -ldrm" >&5
+printf %s "checking for drmPrimeHandleToFD in -ldrm... " >&6; }
+if test ${ac_cv_lib_drm_drmPrimeHandleToFD+y}
+then :
+  printf %s "(cached) " >&6
+else $as_nop
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-ldrm $DRM_LIBS $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+char drmPrimeHandleToFD ();
+int
+main (void)
+{
+return drmPrimeHandleToFD ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_drm_drmPrimeHandleToFD=yes
+else $as_nop
+  ac_cv_lib_drm_drmPrimeHandleToFD=no
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_drm_drmPrimeHandleToFD" >&5
+printf "%s\n" "$ac_cv_lib_drm_drmPrimeHandleToFD" >&6; }
+if test "x$ac_cv_lib_drm_drmPrimeHandleToFD" = xyes
+then :
+  :
+else $as_nop
+  DRM_LIBS=""
+fi
+
+CPPFLAGS=$ac_save_CPPFLAGS
+
 fi
 if test -z "$WAYLAND_CLIENT_LIBS" ||
                            test -z "$WAYLAND_PROTOCOLS_DATADIR" ||
                            test -z "$WAYLAND_SCANNER" ||
                            test -z "$WAYLAND_CURSOR_LIBS" ||
-                           test -z "$XKBCOMMON_LIBS"
+                           test -z "$XKBCOMMON_LIBS" ||
+                           test -z "$DRM_LIBS"
 then :
   case "x$with_wayland" in
   x)   as_fn_append wine_notices "|Wayland ${notice_platform}development files not found or not new enough, the Wayland driver won't be supported." ;;
@@ -23419,6 +23504,8 @@ WAYLAND_CURSOR_CFLAGS = $WAYLAND_CURSOR_CFLAGS
 WAYLAND_CURSOR_LIBS = $WAYLAND_CURSOR_LIBS
 XKBCOMMON_CFLAGS = $XKBCOMMON_CFLAGS
 XKBCOMMON_LIBS = $XKBCOMMON_LIBS
+DRM_CFLAGS = $DRM_CFLAGS
+DRM_LIBS = $DRM_LIBS
 PCAP_LIBS = $PCAP_LIBS
 PCSCLITE_LIBS = $PCSCLITE_LIBS
 INOTIFY_CFLAGS = $INOTIFY_CFLAGS

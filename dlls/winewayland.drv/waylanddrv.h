@@ -31,6 +31,7 @@
 #include <wayland-cursor.h>
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-compose.h>
+#include "linux-dmabuf-unstable-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
@@ -134,6 +135,11 @@ struct wayland_pointer
     HCURSOR hcursor;
 };
 
+struct wayland_dmabuf
+{
+    struct zwp_linux_dmabuf_v1 *zwp_linux_dmabuf_v1;
+};
+
 struct wayland
 {
     struct wl_list thread_link;
@@ -157,6 +163,7 @@ struct wayland
     struct wl_list surface_list;
     struct wayland_keyboard keyboard;
     struct wayland_pointer pointer;
+    struct wayland_dmabuf dmabuf;
     DWORD last_dispatch_mask;
     BOOL processing_events;
     uint32_t last_button_serial;
@@ -262,6 +269,14 @@ struct wayland_shm_buffer
     BOOL busy;
     HRGN damage_region;
     BOOL destroy_on_release;
+};
+
+struct wayland_dmabuf_buffer
+{
+   struct wl_list link;
+   struct wl_buffer *wl_buffer;
+   int width, height, stride;
+   uint32_t format;
 };
 
 struct wayland_buffer_queue
@@ -431,6 +446,18 @@ void wayland_shm_buffer_add_damage(struct wayland_shm_buffer *shm_buffer, HRGN d
 void wayland_shm_buffer_copy(struct wayland_shm_buffer *dst_buffer,
                              struct wayland_shm_buffer *src_buffer,
                              HRGN region) DECLSPEC_HIDDEN;
+
+/**********************************************************************
+ *          Wayland dmabuf
+ */
+
+void wayland_dmabuf_init(struct wayland_dmabuf *dmabuf,
+                         struct zwp_linux_dmabuf_v1 *zwp_linux_dmabuf_v1) DECLSPEC_HIDDEN;
+void wayland_dmabuf_deinit(struct wayland_dmabuf *dmabuf) DECLSPEC_HIDDEN;
+struct wayland_dmabuf_buffer *wayland_dmabuf_buffer_create_from_native(struct wayland *wayland,
+                                                                       struct wayland_native_buffer *native) DECLSPEC_HIDDEN;
+void wayland_dmabuf_buffer_destroy(struct wayland_dmabuf_buffer *dmabuf_buffer) DECLSPEC_HIDDEN;
+struct wl_buffer *wayland_dmabuf_buffer_steal_wl_buffer_and_destroy(struct wayland_dmabuf_buffer *dmabuf_buffer) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Wayland buffer queue

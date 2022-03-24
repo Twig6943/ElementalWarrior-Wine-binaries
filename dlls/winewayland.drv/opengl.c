@@ -71,6 +71,8 @@ struct wayland_gl_drawable
     EGLSurface      surface;
     struct wl_event_queue *wl_event_queue;
     struct wl_list  buffer_list;
+    int             swap_interval;
+    struct wl_callback *throttle_callback;
 };
 
 struct wayland_gl_buffer
@@ -162,6 +164,7 @@ static struct wayland_gl_drawable *wayland_gl_drawable_create(HWND hwnd, int for
         if (!gl->wl_event_queue) goto err;
     }
     wl_list_init(&gl->buffer_list);
+    gl->swap_interval = 1;
 
     wayland_mutex_lock(&gl_object_mutex);
     wl_list_insert(&gl_drawables, &gl->link);
@@ -215,6 +218,7 @@ static void wayland_destroy_gl_drawable(HWND hwnd)
         if (gl->gbm_surface) gbm_surface_destroy(gl->gbm_surface);
         if (gl->wayland_surface)
             wayland_surface_unref_glvk(gl->wayland_surface);
+        if (gl->throttle_callback) wl_callback_destroy(gl->throttle_callback);
         if (gl->wl_event_queue) wl_event_queue_destroy(gl->wl_event_queue);
         free(gl);
         break;
@@ -487,6 +491,19 @@ err:
     return NULL;
 }
 
+static void throttle_callback(void *data, struct wl_callback *callback, uint32_t time)
+{
+    struct wayland_gl_drawable *draw_gl = data;
+
+    TRACE("hwnd=%p\n", draw_gl->hwnd);
+    draw_gl->throttle_callback = NULL;
+    wl_callback_destroy(callback);
+}
+
+static const struct wl_callback_listener throttle_listener = {
+    throttle_callback
+};
+
 static BOOL wayland_gl_drawable_commit(struct wayland_gl_drawable *gl,
                                        struct wayland_gl_buffer *gl_buffer)
 {
@@ -501,12 +518,57 @@ static BOOL wayland_gl_drawable_commit(struct wayland_gl_drawable *gl,
         wayland_surface_ensure_mapped(gl->wayland_surface);
         wl_surface_attach(gl_wl_surface, gl_buffer->dmabuf_buffer->wl_buffer, 0, 0);
         wl_surface_damage_buffer(gl_wl_surface, 0, 0, INT32_MAX, INT32_MAX);
+        if (gl->swap_interval > 0)
+        {
+            gl->throttle_callback = wl_surface_frame(gl_wl_surface);
+            wl_proxy_set_queue((struct wl_proxy *) gl->throttle_callback,
+                                gl->wl_event_queue);
+            wl_callback_add_listener(gl->throttle_callback, &throttle_listener, gl);
+        }
         wl_surface_commit(gl_wl_surface);
         committed = TRUE;
     }
     wayland_mutex_unlock(&gl->wayland_surface->mutex);
 
     return committed;
+}
+
+static UINT get_tick_count_since(UINT start)
+{
+    UINT now = NtGetTickCount();
+    /* Handle tick count wrap around to zero. */
+    if (now < start)
+        return 0xffffffff - start + now + 1;
+    else
+        return now - start;
+}
+
+static void wayland_gl_drawable_throttle(struct wayland_gl_drawable *gl)
+{
+    static const UINT timeout = 100;
+    UINT start, elapsed;
+
+    if (gl->swap_interval == 0) goto out;
+
+    start = NtGetTickCount();
+    elapsed = 0;
+
+    /* The compositor may at any time decide to not display the surface on
+     * screen and thus not send any frame events. Until we have a better way to
+     * deal with this, wait for a maximum of timeout for the frame event to
+     * arrive, in order to avoid blocking the GL thread indefinitely. */
+    while (gl->throttle_callback && elapsed < timeout &&
+           wayland_dispatch_queue(gl->wl_event_queue, timeout - elapsed) != -1)
+    {
+        elapsed = get_tick_count_since(start);
+    }
+
+out:
+    if (gl->throttle_callback)
+    {
+        wl_callback_destroy(gl->throttle_callback);
+        gl->throttle_callback = NULL;
+    }
 }
 
 static BOOL wgl_context_refresh(struct wgl_context *ctx)
@@ -986,6 +1048,8 @@ static BOOL wayland_wglSwapBuffers(HDC hdc)
         struct wayland_gl_buffer *gl_buffer;
         struct gbm_bo *bo;
 
+        wayland_gl_drawable_throttle(draw_gl);
+
         p_eglSwapBuffers(egl_display, draw_gl->surface);
 
         bo = gbm_surface_lock_front_buffer(draw_gl->gbm_surface);
@@ -1013,6 +1077,59 @@ static BOOL wayland_wglSwapBuffers(HDC hdc)
 
 out:
     wayland_gl_drawable_release(draw_gl);
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *		wayland_wglGetSwapIntervalEXT
+ */
+static int wayland_wglGetSwapIntervalEXT(void)
+{
+    struct wgl_context *ctx = NtCurrentTeb()->glContext;
+    struct wayland_gl_drawable *gl;
+    int swap_interval;
+
+    if (!(gl = wayland_gl_drawable_get(ctx->draw_hwnd)))
+    {
+        /* This can't happen because a current WGL context is required to get
+         * here. Likely the application is buggy.
+         */
+        WARN("No GL drawable found, returning swap interval 0\n");
+        return 0;
+    }
+
+    swap_interval = gl->swap_interval;
+    wayland_gl_drawable_release(gl);
+
+    return swap_interval;
+}
+
+/***********************************************************************
+ *		wayland_wglGetSwapIntervalEXT
+ */
+static BOOL wayland_wglSwapIntervalEXT(int interval)
+{
+    struct wgl_context *ctx = NtCurrentTeb()->glContext;
+    struct wayland_gl_drawable *gl;
+
+    TRACE("(%d)\n", interval);
+
+    if (interval < 0)
+    {
+        RtlSetLastWin32Error(ERROR_INVALID_DATA);
+        return FALSE;
+    }
+
+    if (!(gl = wayland_gl_drawable_get(ctx->draw_hwnd)))
+    {
+        RtlSetLastWin32Error(ERROR_DC_NOT_FOUND);
+        return FALSE;
+    }
+
+    gl->swap_interval = interval;
+
+    wayland_gl_drawable_release(gl);
 
     return TRUE;
 }
@@ -1086,6 +1203,10 @@ static void init_extensions(void)
 
     if (has_extension(egl_exts, "EGL_KHR_create_context"))
         has_khr_create_context = TRUE;
+
+    register_extension("WGL_EXT_swap_control");
+    egl_funcs.ext.p_wglSwapIntervalEXT = wayland_wglSwapIntervalEXT;
+    egl_funcs.ext.p_wglGetSwapIntervalEXT = wayland_wglGetSwapIntervalEXT;
 
     /* load standard functions and extensions exported from the OpenGL library */
 

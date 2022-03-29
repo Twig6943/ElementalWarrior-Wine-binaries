@@ -203,6 +203,7 @@ size_t unicode_to_ascii_maybe_z(char *dst, size_t dst_max_chars,
                                 const WCHAR *src, size_t src_max_chars) DECLSPEC_HIDDEN;
 size_t ascii_to_unicode_z(WCHAR *dst, size_t dst_max_chars,
                           const char *src, size_t src_max_chars) DECLSPEC_HIDDEN;
+int wayland_shmfd_create(const char *name, int size) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          USER32 helpers

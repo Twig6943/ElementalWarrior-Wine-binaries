@@ -24,6 +24,7 @@ C_SRCS = \
 	wayland_native_buffer.c \
 	wayland_output.c \
 	wayland_pointer.c \
+	wayland_remote.c \
 	wayland_shm.c \
 	wayland_shmfd.c \
 	wayland_surface.c \

@@ -70,6 +70,7 @@ enum wayland_window_message
     WM_WAYLAND_SURFACE_OUTPUT_CHANGE,
     WM_WAYLAND_REAPPLY_CURSOR,
     WM_WAYLAND_WINDOW_SURFACE_FLUSH,
+    WM_WAYLAND_REMOTE_SURFACE,
 };
 
 enum wayland_surface_role
@@ -85,6 +86,18 @@ enum wayland_configure_flags
     WAYLAND_CONFIGURE_FLAG_ACTIVATED  = (1 << 1),
     WAYLAND_CONFIGURE_FLAG_MAXIMIZED  = (1 << 2),
     WAYLAND_CONFIGURE_FLAG_FULLSCREEN = (1 << 3),
+};
+
+enum wayland_remote_surface_type
+{
+    WAYLAND_REMOTE_SURFACE_TYPE_NORMAL,
+    WAYLAND_REMOTE_SURFACE_TYPE_GLVK,
+};
+
+enum wayland_remote_buffer_type
+{
+    WAYLAND_REMOTE_BUFFER_TYPE_SHM,
+    WAYLAND_REMOTE_BUFFER_TYPE_DMABUF,
 };
 
 /**********************************************************************
@@ -625,6 +638,14 @@ DWORD reg_get_value_a(HKEY hkey, const char *name, ULONG type, char *buffer,
 
 xkb_layout_index_t _xkb_state_get_active_layout(struct xkb_state *xkb_state) DECLSPEC_HIDDEN;
 int _xkb_keysyms_to_utf8(const xkb_keysym_t *syms, int nsyms, char *utf8, int utf8_size) DECLSPEC_HIDDEN;
+
+/**********************************************************************
+ *          Wayland remote (cross-process) rendering
+ */
+
+void wayland_remote_surface_handle_message(struct wayland_surface *wayland_surface,
+                                           WPARAM message, LPARAM params) DECLSPEC_HIDDEN;
+void wayland_destroy_remote_surfaces(HWND hwnd) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Misc. helpers

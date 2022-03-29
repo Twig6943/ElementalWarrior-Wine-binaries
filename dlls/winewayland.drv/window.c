@@ -1027,6 +1027,7 @@ void WAYLAND_DestroyWindow(HWND hwnd)
     if (!(data = wayland_win_data_get(hwnd))) return;
     wayland_clear_window_surface_last_flushed(hwnd);
     wayland_destroy_gl_drawable(hwnd);
+    wayland_destroy_remote_surfaces(hwnd);
     wayland_win_data_destroy(data);
 }
 
@@ -1721,6 +1722,14 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             if (data && data->window_surface)
                 wayland_window_surface_flush(data->window_surface);
             wayland_win_data_release(data);
+        }
+        break;
+    case WM_WAYLAND_REMOTE_SURFACE:
+        {
+            struct wayland_surface *wayland_surface = wayland_surface_for_hwnd_lock(hwnd);
+            if (wayland_surface)
+                wayland_remote_surface_handle_message(wayland_surface, wp, lp);
+            wayland_surface_for_hwnd_unlock(wayland_surface);
         }
         break;
     default:

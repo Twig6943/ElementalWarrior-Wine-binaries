@@ -92,6 +92,12 @@ struct params_buffer
     HANDLE throttle_event;
 };
 
+struct wayland_remote_surface_proxy
+{
+    HWND hwnd;
+    enum wayland_remote_surface_type type;
+};
+
 static struct wayland_mutex wayland_remote_surface_mutex =
 {
     PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP, 0, 0, __FILE__ ": wayland_remote_surface_mutex"
@@ -706,4 +712,279 @@ void wayland_destroy_remote_surfaces(HWND hwnd)
         }
     }
     wayland_mutex_unlock(&wayland_remote_surface_mutex);
+}
+
+static HANDLE remote_handle_from_local(HANDLE local_handle, HWND remote_hwnd)
+{
+    HANDLE remote_handle = 0;
+    HANDLE remote_process = 0;
+    DWORD remote_process_id;
+    OBJECT_ATTRIBUTES attr = { .Length = sizeof(OBJECT_ATTRIBUTES) };
+    CLIENT_ID cid;
+
+    if (!NtUserGetWindowThread(remote_hwnd, &remote_process_id)) return 0;
+
+    cid.UniqueProcess = ULongToHandle(remote_process_id);
+
+    if (NtOpenProcess(&remote_process, PROCESS_DUP_HANDLE, &attr, &cid) ||
+        !remote_process)
+    {
+        ERR("Failed to open process with id %#x\n", (UINT)remote_process_id);
+        return 0;
+    }
+
+    if (NtDuplicateObject(GetCurrentProcess(), local_handle, remote_process,
+                          &remote_handle, 0, 0, DUPLICATE_SAME_ACCESS))
+    {
+        ERR("Failed to duplicate handle in remote process\n");
+    }
+
+    NtClose(remote_process);
+
+    return remote_handle;
+}
+
+static HANDLE remote_handle_from_fd(int fd, HWND remote_hwnd)
+{
+    HANDLE local_fd_handle = 0;
+    HANDLE remote_fd_handle = 0;
+
+    if (wine_server_fd_to_handle(fd, GENERIC_READ | SYNCHRONIZE, 0,
+                                 &local_fd_handle) != STATUS_SUCCESS)
+    {
+        ERR("Failed to get handle from fd\n");
+        goto out;
+    }
+
+    remote_fd_handle = remote_handle_from_local(local_fd_handle, remote_hwnd);
+
+out:
+    if (local_fd_handle) NtClose(local_fd_handle);
+
+    return remote_fd_handle;
+}
+
+/**********************************************************************
+ *          wayland_remote_surface_proxy_create
+ *
+ *  Creates a proxy for rendering to a remote surface.
+ */
+struct wayland_remote_surface_proxy *wayland_remote_surface_proxy_create(HWND hwnd,
+                                                                         enum wayland_remote_surface_type type)
+{
+    int params_fd;
+    struct params_type *params;
+    HANDLE remote_params_handle;
+    struct wayland_remote_surface_proxy *proxy;
+
+    TRACE("hwnd=%p type=%d\n", hwnd, type);
+
+    proxy = calloc(1, sizeof(*proxy));
+    if (!proxy) return NULL;
+
+    proxy->hwnd = hwnd;
+    proxy->type = type;
+
+    params_fd = wayland_shmfd_create("wayland-remote-surface-create-glvk", sizeof(*params));
+    if (params_fd < 0) goto err;
+    params = mmap(NULL, sizeof(*params), PROT_WRITE, MAP_SHARED, params_fd, 0);
+    if (params == MAP_FAILED) goto err;
+    params->type = proxy->type;
+    munmap(params, sizeof(*params));
+
+    remote_params_handle = remote_handle_from_fd(params_fd, hwnd);
+    if (!remote_params_handle) goto err;
+
+    NtUserPostMessage(proxy->hwnd, WM_WAYLAND_REMOTE_SURFACE,
+                      WAYLAND_REMOTE_SURFACE_MESSAGE_CREATE,
+                      HandleToLong(remote_params_handle));
+
+    close(params_fd);
+
+    TRACE("hwnd=%p type=%d => proxy=%p\n", hwnd, type, proxy);
+
+    return proxy;
+
+err:
+    if (params_fd >= 0) close(params_fd);
+    if (proxy) free(proxy);
+    return NULL;
+}
+
+/**********************************************************************
+ *          wayland_remote_surface_proxy_destroy
+ *
+ *  Destroys a proxy to a remote surface.
+ */
+void wayland_remote_surface_proxy_destroy(struct wayland_remote_surface_proxy *proxy)
+{
+    int params_fd;
+    struct params_type *params;
+    HANDLE remote_params_handle;
+
+    TRACE("proxy=%p hwnd=%p type=%d\n", proxy, proxy->hwnd, proxy->type);
+
+    params_fd = wayland_shmfd_create("wayland-remote-surface-destroy", sizeof(*params));
+    if (params_fd < 0) goto out;
+    params = mmap(NULL, sizeof(*params), PROT_WRITE, MAP_SHARED, params_fd, 0);
+    if (params == MAP_FAILED) goto out;
+    params->type = proxy->type;
+    munmap(params, sizeof(*params));
+
+    remote_params_handle = remote_handle_from_fd(params_fd, proxy->hwnd);
+    if (!remote_params_handle) goto out;
+
+    NtUserPostMessage(proxy->hwnd, WM_WAYLAND_REMOTE_SURFACE,
+                      WAYLAND_REMOTE_SURFACE_MESSAGE_DESTROY,
+                      HandleToLong(remote_params_handle));
+
+out:
+    if (params_fd >= 0) close(params_fd);
+    free(proxy);
+}
+
+/**********************************************************************
+ *          wayland_remote_surface_proxy_commit
+ *
+ *  Commits a dmabuf to the surface targeted by the remote surface proxy.
+ *
+ *  Returns a handle to an Event that will be set when the committed buffer
+ *  can be reused.
+ */
+BOOL wayland_remote_surface_proxy_commit(struct wayland_remote_surface_proxy *proxy,
+                                         struct wayland_native_buffer *native,
+                                         enum wayland_remote_buffer_type buffer_type,
+                                         enum wayland_remote_buffer_commit commit,
+                                         HANDLE *buffer_released_event_out,
+                                         HANDLE *throttle_event_out)
+{
+    int params_fd;
+    struct params_buffer *params = MAP_FAILED;
+    HANDLE local_released_event = 0;
+    HANDLE local_throttle_event = 0;
+    HANDLE remote_params_handle;
+    OBJECT_ATTRIBUTES attr = { .Length = sizeof(attr), .Attributes = OBJ_OPENIF };
+    int i;
+
+    TRACE("proxy=%p hwnd=%p type=%d commit=%d\n",
+          proxy, proxy->hwnd, proxy->type, commit);
+
+    /* Create buffer params */
+    params_fd = wayland_shmfd_create("wayland-remote-surface-commit", sizeof(*params));
+    if (params_fd < 0) goto err;
+    params = mmap(NULL, sizeof(*params), PROT_WRITE, MAP_SHARED, params_fd, 0);
+    if (params == MAP_FAILED) goto err;
+
+    /* Populate buffer params */
+    params->params_type.type = proxy->type;
+    params->buffer_type = buffer_type;
+    params->plane_count = native->plane_count;
+    for (i = 0; i < native->plane_count; i++)
+    {
+        params->fds[i] = remote_handle_from_fd(native->fds[i], proxy->hwnd);
+        if (!params->fds[i]) goto err;
+        params->strides[i] = native->strides[i];
+        params->offsets[i] = native->offsets[i];
+    }
+    params->width = native->width;
+    params->height = native->height;
+    params->format = native->format;
+    params->modifier = native->modifier;
+
+    if (commit != WAYLAND_REMOTE_BUFFER_COMMIT_DETACHED)
+    {
+        if (NtCreateEvent(&local_released_event, EVENT_ALL_ACCESS, &attr, NotificationEvent, FALSE) ||
+            !local_released_event)
+        {
+            goto err;
+        }
+        params->released_event = remote_handle_from_local(local_released_event, proxy->hwnd);
+        if (!params->released_event) goto err;
+    }
+
+    if (commit == WAYLAND_REMOTE_BUFFER_COMMIT_THROTTLED)
+    {
+        if (NtCreateEvent(&local_throttle_event, EVENT_ALL_ACCESS, &attr, NotificationEvent, FALSE) ||
+            !local_throttle_event)
+        {
+            goto err;
+        }
+        params->throttle_event = remote_handle_from_local(local_throttle_event, proxy->hwnd);
+        if (!params->throttle_event) goto err;
+    }
+
+    /* Create remote handle for params and post message. */
+    remote_params_handle = remote_handle_from_fd(params_fd, proxy->hwnd);
+    if (!remote_params_handle) goto err;
+
+    TRACE("proxy=%p hwnd=%p type=%d commit=%d => local_released=%p "
+          "remote_released=%p, local_throttle=%p remote_throttle=%p\n",
+          proxy, proxy->hwnd, proxy->type, commit, local_released_event,
+          params->released_event, local_throttle_event, params->throttle_event);
+
+    NtUserPostMessage(proxy->hwnd, WM_WAYLAND_REMOTE_SURFACE,
+                      WAYLAND_REMOTE_SURFACE_MESSAGE_COMMIT,
+                      HandleToLong(remote_params_handle));
+
+    munmap(params, sizeof(*params));
+    close(params_fd);
+
+    if (buffer_released_event_out)
+        *buffer_released_event_out = local_released_event;
+    else if (local_released_event)
+        NtClose(local_released_event);
+
+    if (throttle_event_out)
+        *throttle_event_out = local_throttle_event;
+    else if (local_throttle_event)
+        NtClose(local_throttle_event);
+
+    return TRUE;
+
+err:
+    if (params != MAP_FAILED)
+    {
+        for (i = 0; i < native->plane_count; i++)
+            if (params->fds[i]) NtClose(params->fds[i]);
+        if (params->released_event) NtClose(params->released_event);
+        munmap(params, sizeof(*params));
+    }
+    if (params_fd >= 0) close(params_fd);
+    if (local_released_event) NtClose(local_released_event);
+    if (local_throttle_event) NtClose(local_throttle_event);
+
+    return FALSE;
+}
+
+/**********************************************************************
+ *          wayland_remote_surface_proxy_dispatch_events
+ *
+ *  Dispatches events (e.g., buffer release events) from the remote surface.
+ */
+BOOL wayland_remote_surface_proxy_dispatch_events(struct wayland_remote_surface_proxy *proxy)
+{
+    int params_fd;
+    struct params_type *params;
+    HANDLE remote_params_handle;
+    BOOL ret = FALSE;
+
+    TRACE("proxy=%p hwnd=%p type=%d\n", proxy, proxy->hwnd, proxy->type);
+
+    params_fd = wayland_shmfd_create("wayland-remote-surface-dispatch", sizeof(*params));
+    if (params_fd < 0) goto out;
+    params = mmap(NULL, sizeof(*params), PROT_WRITE, MAP_SHARED, params_fd, 0);
+    if (params == MAP_FAILED) goto out;
+    params->type = proxy->type;
+    munmap(params, sizeof(*params));
+
+    remote_params_handle = remote_handle_from_fd(params_fd, proxy->hwnd);
+    if (!remote_params_handle) goto out;
+
+    ret = NtUserPostMessage(proxy->hwnd, WM_WAYLAND_REMOTE_SURFACE,
+                            WAYLAND_REMOTE_SURFACE_MESSAGE_DISPATCH_EVENTS,
+                            HandleToLong(remote_params_handle));
+
+out:
+    if (params_fd >= 0) close(params_fd);
+    return ret;
 }

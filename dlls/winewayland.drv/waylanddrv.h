@@ -100,6 +100,13 @@ enum wayland_remote_buffer_type
     WAYLAND_REMOTE_BUFFER_TYPE_DMABUF,
 };
 
+enum wayland_remote_buffer_commit
+{
+    WAYLAND_REMOTE_BUFFER_COMMIT_NORMAL,
+    WAYLAND_REMOTE_BUFFER_COMMIT_THROTTLED,
+    WAYLAND_REMOTE_BUFFER_COMMIT_DETACHED,
+};
+
 /**********************************************************************
  *          Definitions for wayland types
  */
@@ -359,6 +366,8 @@ struct wayland_buffer_queue
 };
 
 typedef void (*wayland_callback_func)(void *data);
+
+struct wayland_remote_surface_proxy;
 
 /**********************************************************************
  *          Wayland thread data
@@ -646,6 +655,16 @@ int _xkb_keysyms_to_utf8(const xkb_keysym_t *syms, int nsyms, char *utf8, int ut
 void wayland_remote_surface_handle_message(struct wayland_surface *wayland_surface,
                                            WPARAM message, LPARAM params) DECLSPEC_HIDDEN;
 void wayland_destroy_remote_surfaces(HWND hwnd) DECLSPEC_HIDDEN;
+struct wayland_remote_surface_proxy *wayland_remote_surface_proxy_create(HWND hwnd,
+                                                                         enum wayland_remote_surface_type type) DECLSPEC_HIDDEN;
+void wayland_remote_surface_proxy_destroy(struct wayland_remote_surface_proxy *proxy) DECLSPEC_HIDDEN;
+BOOL wayland_remote_surface_proxy_commit(struct wayland_remote_surface_proxy *proxy,
+                                         struct wayland_native_buffer *native,
+                                         enum wayland_remote_buffer_type buffer_type,
+                                         enum wayland_remote_buffer_commit commit,
+                                         HANDLE *buffer_released_event,
+                                         HANDLE *throttle_event) DECLSPEC_HIDDEN;
+BOOL wayland_remote_surface_proxy_dispatch_events(struct wayland_remote_surface_proxy *proxy) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Misc. helpers

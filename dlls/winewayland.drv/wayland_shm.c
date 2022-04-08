@@ -35,8 +35,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
-static struct wayland_shm_buffer *wayland_shm_buffer_create_from_native(struct wayland *wayland,
-                                                                        struct wayland_native_buffer *native)
+/**********************************************************************
+ *          wayland_shm_buffer_create_from_native
+ *
+ * Creates a wayland SHM buffer from the specified native buffer.
+ */
+struct wayland_shm_buffer *wayland_shm_buffer_create_from_native(struct wayland *wayland,
+                                                                 struct wayland_native_buffer *native)
 {
     struct wayland_shm_buffer *shm_buffer;
     struct wl_shm_pool *pool;

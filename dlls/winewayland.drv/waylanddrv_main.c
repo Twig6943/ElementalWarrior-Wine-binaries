@@ -119,6 +119,7 @@ const struct user_driver_funcs waylanddrv_funcs =
     .dc_funcs.pCreateDC = WAYLAND_CreateDC,
     .dc_funcs.pCreateCompatibleDC = WAYLAND_CreateCompatibleDC,
     .dc_funcs.pDeleteDC = WAYLAND_DeleteDC,
+    .dc_funcs.pPutImage = WAYLAND_PutImage,
     .dc_funcs.priority = GDI_PRIORITY_GRAPHICS_DRV,
 
     .pChangeDisplaySettings = WAYLAND_ChangeDisplaySettings,

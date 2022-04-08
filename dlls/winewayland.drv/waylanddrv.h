@@ -784,5 +784,8 @@ BOOL CDECL WAYLAND_CreateDC(PHYSDEV *pdev, LPCWSTR device,
                             LPCWSTR output, const DEVMODEW* initData) DECLSPEC_HIDDEN;
 BOOL CDECL WAYLAND_CreateCompatibleDC(PHYSDEV orig, PHYSDEV *pdev) DECLSPEC_HIDDEN;
 BOOL CDECL WAYLAND_DeleteDC(PHYSDEV dev) DECLSPEC_HIDDEN;
+DWORD CDECL WAYLAND_PutImage(PHYSDEV dev, HRGN clip, BITMAPINFO *info,
+                             const struct gdi_image_bits *bits, struct bitblt_coords *src,
+                             struct bitblt_coords *dst, DWORD rop) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_WAYLANDDRV_H */

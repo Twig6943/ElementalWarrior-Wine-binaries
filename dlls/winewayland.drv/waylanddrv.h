@@ -384,6 +384,16 @@ BOOL wayland_init_set_cursor(void) DECLSPEC_HIDDEN;
 void wayland_reapply_thread_cursor(void) DECLSPEC_HIDDEN;
 
 /**********************************************************************
+ *          Registry helpers
+ */
+
+HKEY reg_open_key_a(HKEY root, const char *name) DECLSPEC_HIDDEN;
+HKEY reg_open_key_w(HKEY root, const WCHAR *nameW) DECLSPEC_HIDDEN;
+HKEY reg_open_hkcu_key_a(const char *name) DECLSPEC_HIDDEN;
+DWORD reg_get_value_a(HKEY hkey, const char *name, ULONG type, char *buffer,
+                      DWORD *buffer_len) DECLSPEC_HIDDEN;
+
+/**********************************************************************
  *          Misc. helpers
  */
 

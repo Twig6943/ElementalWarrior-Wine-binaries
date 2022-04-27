@@ -7,6 +7,7 @@ C_SRCS = \
 	display.c \
 	dllmain.c \
 	gdi.c \
+	registry.c \
 	unicode.c \
 	wayland.c \
 	wayland_buffer_queue.c \

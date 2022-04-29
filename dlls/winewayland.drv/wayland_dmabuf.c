@@ -29,12 +29,19 @@
 
 #include <drm_fourcc.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/mman.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
 /**********************************************************************
  *          dmabuf private helpers
  */
+
+static BOOL dmabuf_has_feedback_support(struct wayland_dmabuf *dmabuf)
+{
+    return dmabuf->version >= ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION;
+}
 
 static BOOL dmabuf_format_has_modifier(struct wayland_dmabuf_format *format, uint64_t modifier)
 {
@@ -110,6 +117,20 @@ static void dmabuf_format_array_release(struct wl_array *formats)
     wl_array_release(formats);
 }
 
+static void dmabuf_feedback_tranche_init(struct wayland_dmabuf_feedback_tranche *tranche)
+{
+    memset(tranche, 0, sizeof(*tranche));
+    wl_array_init(&tranche->formats);
+}
+
+/* Moves src tranche to dst, and resets src. */
+static void dmabuf_feedback_tranche_move(struct wayland_dmabuf_feedback_tranche *dst,
+                                         struct wayland_dmabuf_feedback_tranche *src)
+{
+    memcpy(dst, src, sizeof(*dst));
+    dmabuf_feedback_tranche_init(src);
+}
+
 /**********************************************************************
  *          zwp_linux_dmabuf_v1 handling
  */
@@ -137,15 +158,174 @@ static const struct zwp_linux_dmabuf_v1_listener dmabuf_listener = {
     dmabuf_modifiers
 };
 
+/**********************************************************************
+ *          default feedback handling
+ */
+
+static void dmabuf_feedback_main_device(void *data,
+                                        struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1,
+                                        struct wl_array *device)
+{
+    struct wayland_dmabuf_feedback *feedback = data;
+
+    if (device->size != sizeof(feedback->main_device))
+        return;
+
+    memcpy(&feedback->main_device, device->data, device->size);
+}
+
+static void dmabuf_feedback_format_table(void *data,
+                                         struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1,
+                                         int32_t fd, uint32_t size)
+{
+    struct wayland_dmabuf_feedback *feedback = data;
+
+    feedback->format_table_entries = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (feedback->format_table_entries == MAP_FAILED)
+    {
+        WARN("Failed to mmap format table entries. fd %d size %u.\n", fd, size);
+        feedback->format_table_entries = NULL;
+        close(fd);
+        return;
+    }
+
+    feedback->format_table_size = size;
+    close(fd);
+}
+
+static void dmabuf_feedback_tranche_target_device(void *data,
+                                                  struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1,
+                                                  struct wl_array *device)
+{
+    struct wayland_dmabuf_feedback *feedback = data;
+
+    memcpy(&feedback->pending_tranche.device, device->data, sizeof(dev_t));
+}
+
+static void dmabuf_feedback_tranche_formats(void *data,
+                                            struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1,
+                                            struct wl_array *indices)
+{
+    struct wayland_dmabuf_feedback *feedback = data;
+    struct wayland_dmabuf_feedback_format_table_entry *table_entries = feedback->format_table_entries;
+    uint16_t *index;
+
+    if (!table_entries)
+    {
+        WARN("Could not add formats/modifiers to tranche due to missing format table\n");
+        return;
+    }
+
+    wl_array_for_each(index, indices)
+    {
+        if (!dmabuf_format_array_add_format_modifier(&feedback->pending_tranche.formats,
+                                                     table_entries[*index].format,
+                                                     table_entries[*index].modifier))
+        {
+            WARN("Could not add format/modifier 0x%08x/0x%" PRIx64 "\n",
+                 table_entries[*index].format,
+                 table_entries[*index].modifier);
+        }
+    }
+}
+
+static void dmabuf_feedback_tranche_flags(void *data,
+                                          struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1,
+                                          uint32_t flags)
+{
+    struct wayland_dmabuf_feedback *feedback = data;
+
+    feedback->pending_tranche.flags = flags;
+}
+
+static void dmabuf_feedback_tranche_done(void *data,
+                                         struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1)
+{
+    struct wayland_dmabuf_feedback *feedback = data;
+    struct wayland_dmabuf_feedback_tranche *tranche;
+
+    if (feedback->pending_tranche.formats.size == 0 ||
+        !(tranche = wl_array_add(&feedback->tranches, sizeof(*tranche))))
+    {
+        WARN("Failed to add tranche with target device %ju\n",
+             (uintmax_t)feedback->pending_tranche.device);
+        dmabuf_format_array_release(&feedback->pending_tranche.formats);
+        dmabuf_feedback_tranche_init(&feedback->pending_tranche);
+        return;
+    }
+    dmabuf_feedback_tranche_move(tranche, &feedback->pending_tranche);
+}
+
+static void dmabuf_feedback_done(void *data,
+                                 struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1)
+{
+    /* ignore event */
+}
+
+static const struct zwp_linux_dmabuf_feedback_v1_listener dmabuf_feedback_listener =
+{
+    .main_device = dmabuf_feedback_main_device,
+    .format_table = dmabuf_feedback_format_table,
+    .tranche_target_device = dmabuf_feedback_tranche_target_device,
+    .tranche_formats = dmabuf_feedback_tranche_formats,
+    .tranche_flags = dmabuf_feedback_tranche_flags,
+    .tranche_done = dmabuf_feedback_tranche_done,
+    .done = dmabuf_feedback_done,
+};
+
+static void dmabuf_feedback_destroy(struct wayland_dmabuf_feedback *feedback)
+{
+    struct wayland_dmabuf_feedback_tranche *tranche;
+
+    dmabuf_format_array_release(&feedback->pending_tranche.formats);
+
+    wl_array_for_each(tranche, &feedback->tranches)
+        dmabuf_format_array_release(&tranche->formats);
+    wl_array_release(&feedback->tranches);
+
+    free(feedback);
+}
+
+static struct wayland_dmabuf_feedback *dmabuf_feedback_create(void)
+{
+    struct wayland_dmabuf_feedback *feedback;
+
+    feedback = calloc(1, sizeof(*feedback));
+    if (!feedback) return NULL;
+
+    wl_array_init(&feedback->tranches);
+    dmabuf_feedback_tranche_init(&feedback->pending_tranche);
+
+    return feedback;
+}
+
 /***********************************************************************
  *           wayland_dmabuf_init
  */
 void wayland_dmabuf_init(struct wayland_dmabuf *dmabuf,
                          struct zwp_linux_dmabuf_v1 *zwp_linux_dmabuf_v1)
 {
+    dmabuf->version = wl_proxy_get_version((struct wl_proxy *)zwp_linux_dmabuf_v1);
     dmabuf->zwp_linux_dmabuf_v1 = zwp_linux_dmabuf_v1;
     wl_array_init(&dmabuf->formats);
-    zwp_linux_dmabuf_v1_add_listener(zwp_linux_dmabuf_v1, &dmabuf_listener, dmabuf);
+
+    /* linux-dmabuf feedback events deprecate format/modifier events from
+     * previous versions. Listen to pre-v4 events only if v4 is not supported. */
+    if (dmabuf_has_feedback_support(dmabuf))
+    {
+        if (!(dmabuf->default_feedback = dmabuf_feedback_create()))
+        {
+            WARN("Could not create default dmabuf feedback: Memory allocation failure.\n");
+            return;
+        }
+        dmabuf->zwp_linux_dmabuf_feedback_v1 =
+            zwp_linux_dmabuf_v1_get_default_feedback(dmabuf->zwp_linux_dmabuf_v1);
+        zwp_linux_dmabuf_feedback_v1_add_listener(dmabuf->zwp_linux_dmabuf_feedback_v1,
+                                                  &dmabuf_feedback_listener,
+                                                  dmabuf->default_feedback);
+    }
+    else
+        zwp_linux_dmabuf_v1_add_listener(zwp_linux_dmabuf_v1, &dmabuf_listener, dmabuf);
 }
 
 /***********************************************************************
@@ -153,6 +333,12 @@ void wayland_dmabuf_init(struct wayland_dmabuf *dmabuf,
  */
 void wayland_dmabuf_deinit(struct wayland_dmabuf *dmabuf)
 {
+    if (dmabuf->zwp_linux_dmabuf_feedback_v1)
+    {
+        dmabuf_feedback_destroy(dmabuf->default_feedback);
+        zwp_linux_dmabuf_feedback_v1_destroy(dmabuf->zwp_linux_dmabuf_feedback_v1);
+    }
+
     dmabuf_format_array_release(&dmabuf->formats);
 
     if (dmabuf->zwp_linux_dmabuf_v1)

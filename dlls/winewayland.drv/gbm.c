@@ -34,6 +34,7 @@
 #endif
 #include <stdlib.h>
 #include <unistd.h>
+#include <xf86drm.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
@@ -115,9 +116,33 @@ static int wayland_gbm_get_drm_fd(const char *sysname, const char *desc)
 
 #endif
 
+static char *get_compositor_render_node(void)
+{
+    struct wayland *wayland = wayland_process_acquire();
+    char *compositor_render_node = NULL;
+    drmDevicePtr dev_ptr;
+
+    if (!wayland->dmabuf.default_feedback)
+        goto out;
+
+    if (drmGetDeviceFromDevId(wayland->dmabuf.default_feedback->main_device,
+                              0, &dev_ptr) < 0)
+        goto out;
+
+    if (dev_ptr->available_nodes & (1 << DRM_NODE_RENDER))
+        compositor_render_node = strdup(dev_ptr->nodes[DRM_NODE_RENDER]);
+
+    drmFreeDevice(&dev_ptr);
+
+out:
+    wayland_process_release();
+    return compositor_render_node;
+}
+
 static void wayland_gbm_init_once(void)
 {
     int drm_fd = -1;
+    char *compositor_render_node = get_compositor_render_node();
     const char *desc;
 
     if (option_drm_device)
@@ -127,6 +152,15 @@ static void wayland_gbm_init_once(void)
               option_drm_device, drm_fd);
         if (drm_fd < 0)
             WARN("Failed to open device from DRMDevice driver option\n");
+    }
+
+    if (drm_fd < 0 && compositor_render_node)
+    {
+        drm_fd = open(compositor_render_node, O_RDWR);
+        TRACE("Trying to open drm device (from compositor render node) %s => fd=%d\n",
+              compositor_render_node, drm_fd);
+        if (drm_fd < 0)
+            WARN("Failed to open drm device that compositor is using\n");
     }
 
     if (drm_fd < 0)
@@ -162,6 +196,8 @@ static void wayland_gbm_init_once(void)
         if (drm_fd < 0)
             WARN("Failed to open default primary node\n");
     }
+
+    free(compositor_render_node);
 
     if (drm_fd < 0)
     {

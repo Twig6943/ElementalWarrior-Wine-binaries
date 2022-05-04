@@ -27,6 +27,7 @@
 #include "waylanddrv.h"
 #include "wine/debug.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #ifdef HAVE_LIBUDEV_H
@@ -49,7 +50,98 @@ static const char render_node_sysname[] = "renderD[0-9]*";
 
 #ifdef HAVE_UDEV
 
-static int wayland_gbm_get_drm_fd(const char *sysname, const char *desc)
+typedef BOOL (*filter_func)(struct udev_device *, const char *);
+
+/* returns TRUE for every udev_dev whose devnode is not devnode_to_ignore */
+static BOOL filter_has_different_devnode(struct udev_device *udev_dev,
+                                         const char *devnode_to_ignore)
+{
+    const char *devnode;
+
+    assert(udev_dev && devnode_to_ignore);
+
+    /* If we can't get a devnode from the device, we prefer to filter it out */
+    devnode = udev_device_get_devnode(udev_dev);
+    if (!devnode)
+        return FALSE;
+
+    /* devnode is equal to devnode_to_ignore */
+    if (strcmp(devnode, devnode_to_ignore) == 0)
+        return FALSE;
+
+    return TRUE;
+}
+
+/* returns TRUE for every udev_dev that is not the primary system GPU */
+static BOOL filter_is_not_primary_system_gpu(struct udev_device *udev_dev,
+                                             const char *unused_arg)
+{
+    struct udev_device *pci_device;
+    const char *boot_vga;
+
+    assert(udev_dev);
+
+    /* If we can't get pci_device, we prefer to filter the device out */
+    pci_device = udev_device_get_parent(udev_dev);
+    if (!pci_device)
+        return FALSE;
+
+    /* It is the primary system GPU */
+    boot_vga = udev_device_get_sysattr_value(pci_device, "boot_vga");
+    if (boot_vga && strcmp(boot_vga, "1") == 0)
+        return FALSE;
+
+    return TRUE;
+}
+
+/* returns TRUE for every udev_dev whose ID_PATH_TAG is id_path_tag */
+static BOOL filter_has_same_id_path_tag(struct udev_device *udev_dev,
+                                        const char *id_path_tag)
+{
+    const char *dev_id_path_tag;
+
+    assert(udev_dev && id_path_tag);
+
+    /* If we can't get dev_id_path_tag, we prefer to filter the device out */
+    dev_id_path_tag = udev_device_get_property_value(udev_dev, "ID_PATH_TAG");
+    if (!dev_id_path_tag)
+        return FALSE;
+
+    /* ID_PATH_TAG is different from id_path_tag */
+    if (strcmp(dev_id_path_tag, id_path_tag) != 0)
+        return FALSE;
+
+    return TRUE;
+}
+
+static BOOL is_primary_system_gpu_set(void)
+{
+    struct udev *udev;
+    struct udev_enumerate *e = NULL;
+    BOOL ret = FALSE;
+
+    udev = udev_new();
+    if (!udev) goto out;
+
+    e = udev_enumerate_new(udev);
+    if (!e) goto out;
+
+    udev_enumerate_add_match_sysattr(e, "boot_vga", "1");
+
+    /* if list is not empty we have a PCI device with boot_vga set to 1 (i.e. we
+     * have a PCI device marked as the primary system GPU) */
+    udev_enumerate_scan_devices(e);
+    if (udev_enumerate_get_list_entry(e)) ret = TRUE;
+
+out:
+    if (e) udev_enumerate_unref(e);
+    if (udev) udev_unref(udev);
+
+    return ret;
+}
+
+static int wayland_gbm_get_drm_fd(const char *sysname, const char *desc,
+                                  filter_func filter, const char *filter_arg)
 {
     const char *seat;
     struct udev *udev = NULL;
@@ -93,6 +185,13 @@ static int wayland_gbm_get_drm_fd(const char *sysname, const char *desc)
             continue;
         }
 
+        /* If we have a filter, we may ignore certain devices */
+        if (filter && filter(device, filter_arg) == FALSE)
+        {
+            udev_device_unref(device);
+            continue;
+        }
+
         drm_fd = open(devnode, O_RDWR);
         TRACE("Trying to open drm device (%s) %s => fd=%d\n", desc, devnode, drm_fd);
 
@@ -109,7 +208,27 @@ out:
 
 #else
 
-static int wayland_gbm_get_drm_fd(const char *sysname, const char *desc)
+typedef void (*filter_func)(void);
+
+static void filter_has_different_devnode(void)
+{
+}
+
+static void filter_is_not_primary_system_gpu(void)
+{
+}
+
+static void filter_has_same_id_path_tag(void)
+{
+}
+
+static BOOL is_primary_system_gpu_set(void)
+{
+    return FALSE;
+}
+
+static int wayland_gbm_get_drm_fd(const char *sysname, const char *desc,
+                                  filter_func filter, const char *filter_arg)
 {
     return -1;
 }
@@ -143,6 +262,7 @@ static void wayland_gbm_init_once(void)
 {
     int drm_fd = -1;
     char *compositor_render_node = get_compositor_render_node();
+    const char *dri_prime = getenv("DRI_PRIME");
     const char *desc;
 
     if (option_drm_device)
@@ -152,6 +272,40 @@ static void wayland_gbm_init_once(void)
               option_drm_device, drm_fd);
         if (drm_fd < 0)
             WARN("Failed to open device from DRMDevice driver option\n");
+    }
+
+    if (drm_fd < 0 && dri_prime)
+    {
+        if (strcmp(dri_prime, "1") == 0)
+        {
+            if (compositor_render_node)
+            {
+                /* DRI_PRIME is 1, so we open the non-default device (device
+                 * that is different from whatever the compositor is using) */
+                desc = "from DRI_PRIME == 1, different from compositor render node";
+                drm_fd = wayland_gbm_get_drm_fd(render_node_sysname, desc,
+                                                filter_has_different_devnode, compositor_render_node);
+            }
+            else if (is_primary_system_gpu_set())
+            {
+                /* We don't know what device the compositor is using, so we
+                 * consider that the primary system GPU is the default device. */
+                desc = "from DRI_PRIME == 1, different from primary system GPU";
+                drm_fd = wayland_gbm_get_drm_fd(render_node_sysname, desc,
+                                                filter_is_not_primary_system_gpu, NULL);
+            }
+        }
+        else
+        {
+            /* DRI_PRIME should be set to ID_TAG_PATH of the GPU the user wants
+             * us to use. */
+            desc = "from DRI_PRIME == ID_PATH_TAG";
+            drm_fd = wayland_gbm_get_drm_fd(render_node_sysname, desc,
+                                            filter_has_same_id_path_tag, dri_prime);
+        }
+
+        if (drm_fd < 0)
+            WARN("Failed to open DRI_PRIME device\n");
     }
 
     if (drm_fd < 0 && compositor_render_node)
@@ -166,7 +320,7 @@ static void wayland_gbm_init_once(void)
     if (drm_fd < 0)
     {
         desc = "random render node";
-        drm_fd = wayland_gbm_get_drm_fd(render_node_sysname, desc);
+        drm_fd = wayland_gbm_get_drm_fd(render_node_sysname, desc, NULL, NULL);
         if (drm_fd < 0)
             WARN("Failed to find a suitable render node\n");
     }
@@ -183,7 +337,7 @@ static void wayland_gbm_init_once(void)
     if (drm_fd < 0)
     {
         desc = "random primary node";
-        drm_fd = wayland_gbm_get_drm_fd(primary_node_sysname, desc);
+        drm_fd = wayland_gbm_get_drm_fd(primary_node_sysname, desc, NULL, NULL);
         if (drm_fd < 0)
             WARN("Failed to find a suitable primary node\n");
     }

@@ -23,9 +23,13 @@
 #include "config.h"
 
 #include "waylanddrv.h"
+#include "wine/debug.h"
 
 #include <assert.h>
 #include <unistd.h>
+#include <xf86drm.h>
+
+WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
 /**********************************************************************
  *          wayland_native_buffer_init_shm
@@ -57,6 +61,54 @@ BOOL wayland_native_buffer_init_shm(struct wayland_native_buffer *native,
     native->format = format;
 
     return TRUE;
+}
+
+/**********************************************************************
+ *          wayland_native_buffer_init_gbm
+ *
+ * Initializes a native buffer from a gbm_bo.
+ */
+BOOL wayland_native_buffer_init_gbm(struct wayland_native_buffer *native,
+                                    struct gbm_bo *bo)
+{
+    int i;
+
+    native->plane_count = gbm_bo_get_plane_count(bo);
+    native->width = gbm_bo_get_width(bo);
+    native->height = gbm_bo_get_height(bo);
+    native->format = gbm_bo_get_format(bo);
+    native->modifier = gbm_bo_get_modifier(bo);
+    for (i = 0; i < ARRAY_SIZE(native->fds); i++)
+        native->fds[i] = -1;
+
+    for (i = 0; i < native->plane_count; i++)
+    {
+        int ret;
+        union gbm_bo_handle handle;
+
+        handle = gbm_bo_get_handle_for_plane(bo, i);
+        if (handle.s32 == -1)
+        {
+            ERR("error: failed to get gbm_bo_handle\n");
+            goto err;
+        }
+
+        ret = drmPrimeHandleToFD(gbm_device_get_fd(gbm_bo_get_device(bo)),
+                                 handle.u32, 0, &native->fds[i]);
+        if (ret < 0 || native->fds[i] < 0)
+        {
+            ERR("error: failed to get dmabuf_fd\n");
+            goto err;
+        }
+        native->strides[i] = gbm_bo_get_stride_for_plane(bo, i);
+        native->offsets[i] = gbm_bo_get_offset(bo, i);
+    }
+
+    return TRUE;
+
+err:
+    wayland_native_buffer_deinit(native);
+    return FALSE;
 }
 
 /**********************************************************************

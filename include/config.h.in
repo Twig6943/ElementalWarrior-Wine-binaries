@@ -78,6 +78,9 @@
 /* Define to 1 if you have the `futimesat' function. */
 #undef HAVE_FUTIMESAT
 
+/* Define to 1 if you have the <gbm.h> header file. */
+#undef HAVE_GBM_H
+
 /* Define to 1 if you have the `getaddrinfo' function. */
 #undef HAVE_GETADDRINFO
 

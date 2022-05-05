@@ -704,6 +704,8 @@ PCSCLITE_LIBS
 PCAP_LIBS
 DRM_LIBS
 DRM_CFLAGS
+GBM_LIBS
+GBM_CFLAGS
 XKBCOMMON_LIBS
 XKBCOMMON_CFLAGS
 WAYLAND_CURSOR_LIBS
@@ -1766,6 +1768,8 @@ WAYLAND_CURSOR_CFLAGS
 WAYLAND_CURSOR_LIBS
 XKBCOMMON_CFLAGS
 XKBCOMMON_LIBS
+GBM_CFLAGS
+GBM_LIBS
 DRM_CFLAGS
 DRM_LIBS
 INOTIFY_CFLAGS
@@ -2589,6 +2593,8 @@ Some influential environment variables:
               C compiler flags for xkbcommon, overriding pkg-config
   XKBCOMMON_LIBS
               Linker flags for xkbcommon, overriding pkg-config
+  GBM_CFLAGS  C compiler flags for gbm, overriding pkg-config
+  GBM_LIBS    Linker flags for gbm, overriding pkg-config
   DRM_CFLAGS  C compiler flags for libdrm, overriding pkg-config
   DRM_LIBS    Linker flags for libdrm, overriding pkg-config
   INOTIFY_CFLAGS
@@ -15909,6 +15915,84 @@ fi
 CPPFLAGS=$ac_save_CPPFLAGS
 
     rm -f conftest.err
+if ${GBM_CFLAGS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  GBM_CFLAGS=`$PKG_CONFIG --cflags gbm 2>conftest.err`
+fi
+fi
+
+if ${GBM_LIBS:+false} :
+then :
+  if test ${PKG_CONFIG+y}
+then :
+  GBM_LIBS=`$PKG_CONFIG --libs gbm 2>/dev/null`
+fi
+fi
+
+
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: gbm cflags: $GBM_CFLAGS" >&5
+printf "%s\n" "$as_me:${as_lineno-$LINENO}: gbm libs: $GBM_LIBS" >&5
+if test -s conftest.err; then
+     printf %s "$as_me:${as_lineno-$LINENO}: gbm errors: " >&5
+     cat conftest.err >&5
+fi
+rm -f conftest.err
+ac_save_CPPFLAGS=$CPPFLAGS
+CPPFLAGS="$CPPFLAGS $GBM_CFLAGS"
+ac_fn_c_check_header_compile "$LINENO" "gbm.h" "ac_cv_header_gbm_h" "$ac_includes_default"
+if test "x$ac_cv_header_gbm_h" = xyes
+then :
+  printf "%s\n" "#define HAVE_GBM_H 1" >>confdefs.h
+
+fi
+
+         { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for gbm_create_device in -lgbm" >&5
+printf %s "checking for gbm_create_device in -lgbm... " >&6; }
+if test ${ac_cv_lib_gbm_gbm_create_device+y}
+then :
+  printf %s "(cached) " >&6
+else $as_nop
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lgbm $GBM_LIBS $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+char gbm_create_device ();
+int
+main (void)
+{
+return gbm_create_device ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  ac_cv_lib_gbm_gbm_create_device=yes
+else $as_nop
+  ac_cv_lib_gbm_gbm_create_device=no
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_gbm_gbm_create_device" >&5
+printf "%s\n" "$ac_cv_lib_gbm_gbm_create_device" >&6; }
+if test "x$ac_cv_lib_gbm_gbm_create_device" = xyes
+then :
+  :
+else $as_nop
+  GBM_LIBS=""
+fi
+
+CPPFLAGS=$ac_save_CPPFLAGS
+
+    rm -f conftest.err
 if ${DRM_CFLAGS:+false} :
 then :
   if test ${PKG_CONFIG+y}
@@ -15992,6 +16076,7 @@ if test -z "$WAYLAND_CLIENT_LIBS" ||
                            test -z "$WAYLAND_SCANNER" ||
                            test -z "$WAYLAND_CURSOR_LIBS" ||
                            test -z "$XKBCOMMON_LIBS" ||
+                           test -z "$GBM_LIBS" ||
                            test -z "$DRM_LIBS"
 then :
   case "x$with_wayland" in
@@ -23504,6 +23589,8 @@ WAYLAND_CURSOR_CFLAGS = $WAYLAND_CURSOR_CFLAGS
 WAYLAND_CURSOR_LIBS = $WAYLAND_CURSOR_LIBS
 XKBCOMMON_CFLAGS = $XKBCOMMON_CFLAGS
 XKBCOMMON_LIBS = $XKBCOMMON_LIBS
+GBM_CFLAGS = $GBM_CFLAGS
+GBM_LIBS = $GBM_LIBS
 DRM_CFLAGS = $DRM_CFLAGS
 DRM_LIBS = $DRM_LIBS
 PCAP_LIBS = $PCAP_LIBS

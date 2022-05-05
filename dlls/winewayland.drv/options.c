@@ -41,6 +41,7 @@
  *              Config options
  */
 
+char *option_drm_device = NULL;
 BOOL option_use_system_cursors = TRUE;
 
 /***********************************************************************
@@ -90,6 +91,9 @@ void wayland_read_options_from_registry(void)
             }
         }
     }
+
+    if (!get_config_key(hkey, appkey, "DRMDevice", REG_SZ, buffer, sizeof(buffer)))
+        option_drm_device = strdup(buffer);
 
     if (!get_config_key(hkey, appkey, "UseSystemCursors", REG_SZ, buffer, sizeof(buffer)))
         option_use_system_cursors = IS_OPTION_TRUE(buffer[0]);

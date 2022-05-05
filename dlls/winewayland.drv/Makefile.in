@@ -1,13 +1,14 @@
 MODULE = winewayland.drv
 UNIXLIB = winewayland.so
 UNIX_CFLAGS = $(WAYLAND_CLIENT_CFLAGS) $(WAYLAND_CURSOR_CFLAGS) $(XKBCOMMON_CFLAGS) \
-              $(DRM_CFLAGS)
+              $(GBM_CFLAGS) $(UDEV_CFLAGS) $(DRM_CFLAGS)
 UNIX_LIBS = -lwin32u -lm $(WAYLAND_CLIENT_LIBS) $(WAYLAND_CURSOR_LIBS) \
-            $(XKBCOMMON_LIBS) $(DRM_LIBS) $(PTHREAD_LIBS)
+            $(XKBCOMMON_LIBS) $(GBM_LIBS) $(UDEV_LIBS) $(DRM_LIBS) $(PTHREAD_LIBS)
 
 C_SRCS = \
 	display.c \
 	dllmain.c \
+	gbm.c \
 	gdi.c \
 	options.c \
 	registry.c \

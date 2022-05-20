@@ -225,6 +225,15 @@ static inline LRESULT send_message_timeout(HWND hwnd, UINT msg, WPARAM wparam, L
     return params.result;
 }
 
+static inline BOOL intersect_rect(RECT *dst, const RECT *src1, const RECT *src2)
+{
+    dst->left = max(src1->left, src2->left);
+    dst->top = max(src1->top, src2->top);
+    dst->right = min(src1->right, src2->right);
+    dst->bottom = min(src1->bottom, src2->bottom);
+    return !IsRectEmpty(dst);
+}
+
 /**********************************************************************
  *          USER driver functions
  */

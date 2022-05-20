@@ -505,6 +505,20 @@ static inline BOOL contains_rect(RECT *outer, const RECT *inner)
     return PtInRect(outer, tl) && PtInRect(outer, br);
 }
 
+static inline BOOL union_rect(RECT *dst, const RECT *src1, const RECT *src2)
+{
+    if (IsRectEmpty(src1)) *dst = *src2;
+    else if (IsRectEmpty(src2)) *dst = *src1;
+    else
+    {
+        dst->left = min(src1->left, src2->left);
+        dst->top = min(src1->top, src2->top);
+        dst->right = max(src1->right, src2->right);
+        dst->bottom = max(src1->bottom, src2->bottom);
+    }
+    return !IsRectEmpty(dst);
+}
+
 static inline HWND get_focus(void)
 {
     GUITHREADINFO info;

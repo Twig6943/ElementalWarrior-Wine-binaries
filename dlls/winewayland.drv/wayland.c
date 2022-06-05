@@ -241,7 +241,7 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
     {
         struct zwp_linux_dmabuf_v1 *zwp_linux_dmabuf_v1 =
             wl_registry_bind(registry, id, &zwp_linux_dmabuf_v1_interface,
-                             version < 2 ? version : 2);
+                             version < 3 ? version : 3);
         wayland_dmabuf_init(&wayland->dmabuf, zwp_linux_dmabuf_v1);
     }
 

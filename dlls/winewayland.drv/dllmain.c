@@ -20,6 +20,13 @@
 
 #include "waylanddrv_dll.h"
 
+typedef NTSTATUS (WINAPI *kernel_callback)(void *params, ULONG size);
+static const kernel_callback kernel_callbacks[] =
+{
+};
+
+C_ASSERT(NtUserDriverCallbackFirst + ARRAYSIZE(kernel_callbacks) == waylanddrv_client_func_last);
+
 static DWORD WINAPI wayland_read_events_thread(void *arg)
 {
     WAYLANDDRV_UNIX_CALL(read_events, NULL);
@@ -32,11 +39,16 @@ static DWORD WINAPI wayland_read_events_thread(void *arg)
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 {
     DWORD tid;
+    void **callback_table;
 
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
 
     DisableThreadLibraryCalls(instance);
     if (__wine_init_unix_call()) return FALSE;
+
+    callback_table = NtCurrentTeb()->Peb->KernelCallbackTable;
+    memcpy(callback_table + NtUserDriverCallbackFirst, kernel_callbacks,
+           sizeof(kernel_callbacks));
 
     if (WAYLANDDRV_UNIX_CALL(init, NULL))
         return FALSE;

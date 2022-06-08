@@ -48,6 +48,8 @@
 #include "unixlib.h"
 #include "wine/gdi_driver.h"
 
+#define WAYLANDDRV_CLIENT_CALL(func, params, size) waylanddrv_client_call(waylanddrv_client_func_ ## func, params, size)
+
 /**********************************************************************
  *          Globals
  */
@@ -793,6 +795,13 @@ static inline HWND get_focus(void)
     info.cbSize = sizeof(info);
     return NtUserGetGUIThreadInfo(GetCurrentThreadId(), &info) ? info.hwndFocus : 0;
 }
+
+/**********************************************************************
+ *          PE/unixlib support
+ */
+
+NTSTATUS waylanddrv_client_call(enum waylanddrv_client_func func, const void *params,
+                                ULONG size) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          USER driver functions

@@ -230,3 +230,14 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
 C_ASSERT(ARRAYSIZE(__wine_unix_call_wow64_funcs) == waylanddrv_unix_func_count);
 
 #endif /* _WIN64 */
+
+/***********************************************************************
+ *           waylanddrv_client_call
+ */
+NTSTATUS waylanddrv_client_call(enum waylanddrv_client_func func, const void *params,
+                                ULONG size)
+{
+    void *ret_ptr;
+    ULONG ret_len;
+    return KeUserModeCallback(func, params, size, &ret_ptr, &ret_len);
+}

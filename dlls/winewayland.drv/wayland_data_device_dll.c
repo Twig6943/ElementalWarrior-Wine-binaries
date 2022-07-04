@@ -121,9 +121,38 @@ static HRESULT WINAPI dataOfferDataObject_GetData(IDataObject *data_object,
                                                   FORMATETC *format_etc,
                                                   STGMEDIUM *medium)
 {
+    HRESULT hr;
+    struct waylanddrv_unix_data_offer_import_format_params params;
+    void *data;
+
     TRACE("(%p, %p, %p)\n", data_object, format_etc, medium);
 
-    return E_UNEXPECTED;
+    hr = IDataObject_QueryGetData(data_object, format_etc);
+    if (!SUCCEEDED(hr))
+        return hr;
+
+    params.data_offer = PtrToUint(data_object);
+    params.format = format_etc->cfFormat;
+    params.data = 0;
+    params.size = 0;
+
+    if (WAYLANDDRV_UNIX_CALL(data_offer_import_format, &params) != 0 || !params.data)
+        return E_UNEXPECTED;
+
+    data = UIntToPtr(params.data);
+
+    medium->hGlobal = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, params.size);
+    if (medium->hGlobal == NULL)
+        return E_OUTOFMEMORY;
+    memcpy(GlobalLock(medium->hGlobal), data, params.size);
+    GlobalUnlock(medium->hGlobal);
+
+    medium->tymed = TYMED_HGLOBAL;
+    medium->pUnkForRelease = 0;
+
+    VirtualFree(data, params.size, MEM_RELEASE);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI dataOfferDataObject_GetDataHere(IDataObject *data_object,

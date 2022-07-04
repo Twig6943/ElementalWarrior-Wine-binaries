@@ -825,6 +825,7 @@ NTSTATUS waylanddrv_client_call(enum waylanddrv_client_func func, const void *pa
                                 ULONG size) DECLSPEC_HIDDEN;
 NTSTATUS waylanddrv_unix_clipboard_message(void *arg) DECLSPEC_HIDDEN;
 NTSTATUS waylanddrv_unix_data_offer_accept_format(void *arg) DECLSPEC_HIDDEN;
+NTSTATUS waylanddrv_unix_data_offer_import_format(void *arg) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          USER driver functions

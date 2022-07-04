@@ -715,3 +715,39 @@ NTSTATUS waylanddrv_unix_data_offer_accept_format(void *arg)
 
     return STATUS_UNSUCCESSFUL;
 }
+
+NTSTATUS waylanddrv_unix_data_offer_import_format(void *arg)
+{
+    struct waylanddrv_unix_data_offer_import_format_params *p = arg;
+    struct wayland_data_offer *data_offer = UIntToPtr(p->data_offer);
+    struct wayland_data_device_format *format;
+
+    TRACE("data_offer=%p clipboard_format=%d\n", data_offer, p->format);
+
+    format = wayland_data_device_format_for_clipboard_format(p->format,
+                                                             &data_offer->types);
+    if (format)
+    {
+        void *data, *vdata = NULL;
+        size_t size;
+        SIZE_T vsize;
+
+        if (!(data = wayland_data_offer_import_format(data_offer, format, &size)))
+            return STATUS_UNSUCCESSFUL;
+        vsize = size;
+        if (NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&vdata,
+                                    zero_bits(), &vsize, MEM_COMMIT, PAGE_READWRITE) ||
+            !vdata)
+        {
+            free(data);
+            return STATUS_UNSUCCESSFUL;
+        }
+        memcpy(vdata, data, size);
+        p->data = PtrToUint(vdata);
+        p->size = size;
+        free(data);
+        return STATUS_SUCCESS;
+    }
+
+    return STATUS_UNSUCCESSFUL;
+}

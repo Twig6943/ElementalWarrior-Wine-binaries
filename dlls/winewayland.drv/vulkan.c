@@ -54,9 +54,11 @@ typedef struct VkWaylandSurfaceCreateInfoKHR
     struct wl_surface *surface;
 } VkWaylandSurfaceCreateInfoKHR;
 
+static VkResult (*pvkCreateDevice)(VkPhysicalDevice, const VkDeviceCreateInfo *, const VkAllocationCallbacks *, VkDevice *);
 static VkResult (*pvkCreateInstance)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *, VkInstance *);
 static VkResult (*pvkCreateSwapchainKHR)(VkDevice, const VkSwapchainCreateInfoKHR *, const VkAllocationCallbacks *, VkSwapchainKHR *);
 static VkResult (*pvkCreateWaylandSurfaceKHR)(VkInstance, const VkWaylandSurfaceCreateInfoKHR *, const VkAllocationCallbacks *, VkSurfaceKHR *);
+static void(*pvkDestroyDevice)(VkDevice, const VkAllocationCallbacks *);
 static void (*pvkDestroyInstance)(VkInstance, const VkAllocationCallbacks *);
 static void (*pvkDestroySurfaceKHR)(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
 static void (*pvkDestroySwapchainKHR)(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks *);
@@ -84,8 +86,16 @@ static struct wayland_mutex wine_vk_object_mutex =
 
 static struct wl_list wine_vk_surface_list = { &wine_vk_surface_list, &wine_vk_surface_list };
 static struct wl_list wine_vk_swapchain_list = { &wine_vk_swapchain_list, &wine_vk_swapchain_list };
+static struct wl_list wine_vk_device_list = { &wine_vk_device_list, &wine_vk_device_list };
 
 static const struct vulkan_funcs vulkan_funcs;
+
+struct wine_vk_device
+{
+    struct wl_list link;
+    VkDevice dev;
+    VkPhysicalDevice phys_dev;
+};
 
 struct wine_vk_surface
 {
@@ -251,6 +261,114 @@ static VkResult wayland_vkCreateInstance(const VkInstanceCreateInfo *create_info
 
     res = pvkCreateInstance(&create_info_host, NULL /* allocator */, instance);
 
+    free((void *)create_info_host.ppEnabledExtensionNames);
+    return res;
+}
+
+static VkResult wine_vk_device_convert_create_info(const VkDeviceCreateInfo *src,
+                                                   VkDeviceCreateInfo *dst)
+{
+    unsigned int i;
+    const char **enabled_extensions = NULL;
+
+    dst->sType = src->sType;
+    dst->flags = src->flags;
+    dst->pNext = src->pNext;
+    dst->enabledLayerCount = 0;
+    dst->ppEnabledLayerNames = NULL;
+    dst->enabledExtensionCount = 0;
+    dst->ppEnabledExtensionNames = NULL;
+    dst->pEnabledFeatures = src->pEnabledFeatures;
+    dst->pQueueCreateInfos = src->pQueueCreateInfos;
+    dst->queueCreateInfoCount = src->queueCreateInfoCount;
+
+    if (src->enabledExtensionCount > 0)
+    {
+        enabled_extensions = calloc(src->enabledExtensionCount, sizeof(*src->ppEnabledExtensionNames));
+        if (!enabled_extensions)
+        {
+            ERR("Failed to allocate memory for enabled extensions\n");
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
+
+        for (i = 0; i < src->enabledExtensionCount; i++)
+            enabled_extensions[i] = src->ppEnabledExtensionNames[i];
+
+        dst->ppEnabledExtensionNames = enabled_extensions;
+        dst->enabledExtensionCount = src->enabledExtensionCount;
+    }
+
+    return VK_SUCCESS;
+}
+
+static struct wine_vk_device *wine_vk_device_from_handle(VkDevice handle)
+{
+    struct wine_vk_device *wine_vk_device;
+
+    wayland_mutex_lock(&wine_vk_object_mutex);
+
+    wl_list_for_each(wine_vk_device, &wine_vk_device_list, link)
+        if (wine_vk_device->dev == handle) goto out;
+
+    wine_vk_device = NULL;
+
+out:
+    wayland_mutex_unlock(&wine_vk_object_mutex);
+    return wine_vk_device;
+}
+
+static void wine_vk_device_destroy(struct wine_vk_device *wine_vk_device)
+{
+    wine_vk_list_remove(&wine_vk_device->link);
+    free(wine_vk_device);
+}
+
+static VkResult wayland_vkCreateDevice(VkPhysicalDevice physical_device,
+                                       const VkDeviceCreateInfo *create_info,
+                                       const VkAllocationCallbacks *allocator,
+                                       VkDevice *device)
+{
+    VkDeviceCreateInfo create_info_host = {0};
+    VkResult res;
+    struct wine_vk_device *wine_vk_device;
+
+    TRACE("%p %p %p %p\n", physical_device, create_info, allocator, device);
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    wine_vk_device = calloc(1, sizeof(*wine_vk_device));
+    if (!wine_vk_device)
+    {
+        ERR("Failed to allocate memory\n");
+        res = VK_ERROR_OUT_OF_HOST_MEMORY;
+        goto err;
+    }
+
+    res = wine_vk_device_convert_create_info(create_info, &create_info_host);
+    if (res != VK_SUCCESS)
+        goto err;
+
+    res = pvkCreateDevice(physical_device, &create_info_host, NULL /* allocator */, device);
+    if (res != VK_SUCCESS)
+    {
+        ERR("Failed to create VkDevice, res=%d\n", res);
+        goto err;
+    }
+
+    wine_vk_device->dev = *device;
+    wine_vk_device->phys_dev = physical_device;
+
+    wl_list_init(&wine_vk_device->link);
+
+    wine_vk_list_add(&wine_vk_device_list, &wine_vk_device->link);
+
+    free((void *)create_info_host.ppEnabledExtensionNames);
+    return res;
+
+err:
+    ERR("Failed to create VkDevice\n");
+    free(wine_vk_device);
     free((void *)create_info_host.ppEnabledExtensionNames);
     return res;
 }
@@ -423,6 +541,23 @@ static void wayland_vkDestroySwapchainKHR(VkDevice device,
         pvkDestroySwapchainKHR(device, wine_vk_swapchain->native_vk_swapchain,
                                NULL /* allocator */);
         wine_vk_swapchain_destroy(wine_vk_swapchain);
+    }
+}
+
+static void wayland_vkDestroyDevice(VkDevice device,
+                                    const VkAllocationCallbacks *allocator)
+{
+    struct wine_vk_device *wine_vk_device = wine_vk_device_from_handle(device);
+
+    TRACE("%p %p\n", device, allocator);
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    if (wine_vk_device)
+    {
+        pvkDestroyDevice(device, NULL /* allocator */);
+        wine_vk_device_destroy(wine_vk_device);
     }
 }
 
@@ -828,9 +963,11 @@ static void wine_vk_init(void)
 
 #define LOAD_FUNCPTR(f) if (!(p##f = dlsym(vulkan_handle, #f))) goto fail
 #define LOAD_OPTIONAL_FUNCPTR(f) p##f = dlsym(vulkan_handle, #f)
+    LOAD_FUNCPTR(vkCreateDevice);
     LOAD_FUNCPTR(vkCreateInstance);
     LOAD_FUNCPTR(vkCreateSwapchainKHR);
     LOAD_FUNCPTR(vkCreateWaylandSurfaceKHR);
+    LOAD_FUNCPTR(vkDestroyDevice);
     LOAD_FUNCPTR(vkDestroyInstance);
     LOAD_FUNCPTR(vkDestroySurfaceKHR);
     LOAD_FUNCPTR(vkDestroySwapchainKHR);
@@ -860,9 +997,11 @@ fail:
 
 static const struct vulkan_funcs vulkan_funcs =
 {
+    .p_vkCreateDevice = wayland_vkCreateDevice,
     .p_vkCreateInstance = wayland_vkCreateInstance,
     .p_vkCreateSwapchainKHR = wayland_vkCreateSwapchainKHR,
     .p_vkCreateWin32SurfaceKHR = wayland_vkCreateWin32SurfaceKHR,
+    .p_vkDestroyDevice = wayland_vkDestroyDevice,
     .p_vkDestroyInstance = wayland_vkDestroyInstance,
     .p_vkDestroySurfaceKHR = wayland_vkDestroySurfaceKHR,
     .p_vkDestroySwapchainKHR = wayland_vkDestroySwapchainKHR,

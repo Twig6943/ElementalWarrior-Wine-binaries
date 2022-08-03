@@ -245,17 +245,17 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
                              version < 4 ? version : 4);
         wayland_dmabuf_init(&wayland->dmabuf, zwp_linux_dmabuf_v1);
     }
+    else if (strcmp(interface, "wl_compositor") == 0)
+    {
+        wayland->wl_compositor =
+            wl_registry_bind(registry, id, &wl_compositor_interface, 4);
+    }
 
     /* The per-process wayland instance should not handle every global, as there
      * is no point. Many globals are only needed by the per-thread instances. */
     if (wayland_is_process(wayland)) return;
 
-    if (strcmp(interface, "wl_compositor") == 0)
-    {
-        wayland->wl_compositor =
-            wl_registry_bind(registry, id, &wl_compositor_interface, 4);
-    }
-    else if (strcmp(interface, "wl_subcompositor") == 0)
+    if (strcmp(interface, "wl_subcompositor") == 0)
     {
         wayland->wl_subcompositor =
             wl_registry_bind(registry, id, &wl_subcompositor_interface, 1);

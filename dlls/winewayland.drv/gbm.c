@@ -37,6 +37,9 @@
 #include <unistd.h>
 #include <xf86drm.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
 struct gbm_device *process_gbm_device;
@@ -365,6 +368,20 @@ static void wayland_gbm_init_once(void)
         ERR("Failed to create gbm device (errno=%d)\n", errno);
         close(drm_fd);
     }
+}
+
+/**********************************************************************
+ *          wayland_gbm_get_render_dev
+ */
+dev_t wayland_gbm_get_render_dev()
+{
+    int dev_fd = gbm_device_get_fd(process_gbm_device);
+    struct stat dev_stat;
+
+    if (dev_fd >= 0 && !fstat(dev_fd, &dev_stat))
+        return dev_stat.st_rdev;
+
+    return 0;
 }
 
 BOOL wayland_gbm_init(void)

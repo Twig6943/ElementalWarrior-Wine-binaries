@@ -405,20 +405,32 @@ static void init_extensions(void)
 static BOOL init_pixel_formats(void)
 {
     EGLint count, i, pass;
-    EGLConfig *egl_configs;
+    EGLConfig *egl_configs = NULL;
+    struct wayland_dmabuf *dmabuf = NULL;
+    dev_t render_dev;
 
     p_eglGetConfigs(egl_display, NULL, 0, &count);
-    egl_configs = malloc(count * sizeof(*egl_configs));
-    pixel_formats = malloc(count * sizeof(*pixel_formats));
-    p_eglGetConfigs(egl_display, egl_configs, count, &count);
-    if (!count || !egl_configs || !pixel_formats)
+    if (!count)
     {
-        free(egl_configs);
-        free(pixel_formats);
-        ERR("eglGetConfigs returned no configs\n");
-        return FALSE;
+        ERR("eglGetConfigs returned no configs.\n");
+        goto err;
     }
 
+    if (!(egl_configs = malloc(count * sizeof(*egl_configs))) ||
+        !(pixel_formats = malloc(count * sizeof(*pixel_formats))))
+    {
+        ERR("Memory allocation failed.\n");
+        goto err;
+    }
+    p_eglGetConfigs(egl_display, egl_configs, count, &count);
+
+    if (!(render_dev = wayland_gbm_get_render_dev()))
+    {
+        ERR("Failed to get device's dev_t from GBM device.\n");
+        goto err;
+    }
+
+    dmabuf = &wayland_process_acquire()->dmabuf;
     /* Use two passes: the first pass adds the onscreen formats to the format list,
      * the second offscreen ones. */
     for (pass = 0; pass < 2; pass++)
@@ -431,6 +443,11 @@ static BOOL init_pixel_formats(void)
             if (!(type & EGL_WINDOW_BIT) == !pass) continue;
 
             p_eglGetConfigAttrib(egl_display, egl_configs[i], EGL_NATIVE_VISUAL_ID, &visual_id);
+
+            /* Ignore formats not supported by the compositor. */
+            if (!wayland_dmabuf_is_format_supported(dmabuf, visual_id, render_dev))
+                continue;
+
             p_eglGetConfigAttrib(egl_display, egl_configs[i], EGL_RENDERABLE_TYPE, &render);
             p_eglGetConfigAttrib(egl_display, egl_configs[i], EGL_CONFIG_ID, &id);
             p_eglGetConfigAttrib(egl_display, egl_configs[i], EGL_NATIVE_RENDERABLE, &native);
@@ -455,10 +472,16 @@ static BOOL init_pixel_formats(void)
         }
         if (pass == 0) nb_onscreen_formats = nb_pixel_formats;
     }
-
+    wayland_process_release();
     free(egl_configs);
 
     return TRUE;
+
+err:
+    free(egl_configs);
+    free(pixel_formats);
+
+    return FALSE;
 }
 
 static BOOL egl_init(void)

@@ -503,6 +503,7 @@ void wayland_shm_buffer_copy(struct wayland_shm_buffer *dst_buffer,
 void wayland_dmabuf_init(struct wayland_dmabuf *dmabuf,
                          struct zwp_linux_dmabuf_v1 *zwp_linux_dmabuf_v1) DECLSPEC_HIDDEN;
 void wayland_dmabuf_deinit(struct wayland_dmabuf *dmabuf) DECLSPEC_HIDDEN;
+BOOL wayland_dmabuf_is_format_supported(struct wayland_dmabuf *dmabuf, uint32_t format, dev_t render_dev) DECLSPEC_HIDDEN;
 struct wayland_dmabuf_buffer *wayland_dmabuf_buffer_create_from_native(struct wayland *wayland,
                                                                        struct wayland_native_buffer *native) DECLSPEC_HIDDEN;
 void wayland_dmabuf_buffer_destroy(struct wayland_dmabuf_buffer *dmabuf_buffer) DECLSPEC_HIDDEN;
@@ -573,6 +574,7 @@ void wayland_reapply_thread_cursor(void) DECLSPEC_HIDDEN;
  */
 
 BOOL wayland_gbm_init(void) DECLSPEC_HIDDEN;
+dev_t wayland_gbm_get_render_dev(void) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Registry helpers

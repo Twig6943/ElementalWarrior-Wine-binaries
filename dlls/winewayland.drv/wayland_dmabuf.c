@@ -34,6 +34,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
+enum dmabuf_dev_prio {
+    DMABUF_DEV_NODEV,
+    DMABUF_DEV_SCANOUT,
+    DMABUF_DEV_RENDER,
+    DMABUF_DEV_MAIN
+};
+
 /**********************************************************************
  *          dmabuf private helpers
  */
@@ -41,6 +48,20 @@ WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 static BOOL dmabuf_has_feedback_support(struct wayland_dmabuf *dmabuf)
 {
     return dmabuf->version >= ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION;
+}
+
+static int dmabuf_feedback_get_tranche_priority(struct wayland_dmabuf_feedback *feedback,
+                                                struct wayland_dmabuf_feedback_tranche *tranche,
+                                                dev_t render_dev)
+{
+    if (tranche->flags & ZWP_LINUX_DMABUF_FEEDBACK_V1_TRANCHE_FLAGS_SCANOUT)
+        return DMABUF_DEV_SCANOUT;
+    else if (tranche->device == render_dev)
+        return DMABUF_DEV_RENDER;
+    else if (tranche->device == feedback->main_device)
+        return DMABUF_DEV_MAIN;
+
+    return DMABUF_DEV_NODEV;
 }
 
 static BOOL dmabuf_format_has_modifier(struct wayland_dmabuf_format *format, uint64_t modifier)
@@ -69,6 +90,31 @@ static struct wayland_dmabuf_format *dmabuf_format_array_find_format(struct wl_a
     }
 
     if (!format_found) dmabuf_format = NULL;
+
+    return dmabuf_format;
+}
+
+static struct wayland_dmabuf_format *dmabuf_feedback_get_format_from_optimal_tranche(struct wayland_dmabuf_feedback *feedback,
+                                                                                     uint32_t format,
+                                                                                     dev_t render_dev,
+                                                                                     struct wayland_dmabuf_feedback_tranche **out_tranche)
+{
+    struct wayland_dmabuf_format *dmabuf_format = NULL;
+    struct wayland_dmabuf_feedback_tranche *tranche;
+    int prio;
+
+    for (prio = DMABUF_DEV_SCANOUT; prio <= DMABUF_DEV_MAIN; prio++)
+    {
+        wl_array_for_each(tranche, &feedback->tranches)
+        {
+            if (prio == dmabuf_feedback_get_tranche_priority(feedback, tranche, render_dev) &&
+                (dmabuf_format = dmabuf_format_array_find_format(&tranche->formats, format)))
+                break;
+        }
+        if (dmabuf_format) break;
+    }
+
+    if (dmabuf_format && out_tranche) *out_tranche = tranche;
 
     return dmabuf_format;
 }
@@ -443,6 +489,17 @@ void wayland_dmabuf_deinit(struct wayland_dmabuf *dmabuf)
 
     if (dmabuf->zwp_linux_dmabuf_v1)
         zwp_linux_dmabuf_v1_destroy(dmabuf->zwp_linux_dmabuf_v1);
+}
+
+/***********************************************************************
+ *           wayland_dmabuf_is_format_supported
+ */
+BOOL wayland_dmabuf_is_format_supported(struct wayland_dmabuf *dmabuf, uint32_t format, dev_t render_dev)
+{
+    if (dmabuf_has_feedback_support(dmabuf))
+        return dmabuf_feedback_get_format_from_optimal_tranche(dmabuf->default_feedback, format, render_dev, NULL) != NULL;
+
+    return dmabuf_format_array_find_format(&dmabuf->formats, format) != NULL;
 }
 
 /***********************************************************************

@@ -119,6 +119,24 @@ static struct wayland_dmabuf_format *dmabuf_feedback_get_format_from_optimal_tra
     return dmabuf_format;
 }
 
+static size_t dmabuf_format_get_modifiers(struct wayland_dmabuf_format *dmabuf_format, uint64_t **modifiers)
+{
+    uint32_t num_modifiers = dmabuf_format->modifiers.size / sizeof(uint64_t);
+
+    if (num_modifiers == 1)
+    {
+        uint64_t *mod = (uint64_t *) dmabuf_format->modifiers.data;
+        if (*mod == DRM_FORMAT_MOD_INVALID) num_modifiers = 0;
+    }
+
+    if (num_modifiers > 0)
+        *modifiers = dmabuf_format->modifiers.data;
+    else
+        *modifiers = NULL;
+
+    return num_modifiers;
+}
+
 static BOOL dmabuf_format_array_add_format_modifier(struct wl_array *formats,
                                                     uint32_t format,
                                                     uint64_t modifier)
@@ -489,6 +507,44 @@ void wayland_dmabuf_deinit(struct wayland_dmabuf *dmabuf)
 
     if (dmabuf->zwp_linux_dmabuf_v1)
         zwp_linux_dmabuf_v1_destroy(dmabuf->zwp_linux_dmabuf_v1);
+}
+
+/***********************************************************************
+ *           wayland_dmabuf_feedback_get_format_info
+ */
+static BOOL wayland_dmabuf_feedback_get_format_info(struct wayland_dmabuf_feedback *feedback, uint32_t drm_format,
+                                                    dev_t render_dev, struct wayland_dmabuf_format_info *format_info)
+{
+    struct wayland_dmabuf_feedback_tranche *tranche;
+    struct wayland_dmabuf_format *dmabuf_format =
+        dmabuf_feedback_get_format_from_optimal_tranche(feedback, drm_format, render_dev, &tranche);
+
+    if (!dmabuf_format) return FALSE;
+
+    format_info->scanoutable = tranche->flags & ZWP_LINUX_DMABUF_FEEDBACK_V1_TRANCHE_FLAGS_SCANOUT;
+    format_info->count_modifiers = dmabuf_format_get_modifiers(dmabuf_format, &format_info->modifiers);
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *           wayland_dmabuf_get_default_format_info
+ */
+BOOL wayland_dmabuf_get_default_format_info(struct wayland_dmabuf *dmabuf, uint32_t drm_format,
+                                            dev_t render_dev, struct wayland_dmabuf_format_info *format_info)
+{
+    struct wayland_dmabuf_format *dmabuf_format;
+
+    if (dmabuf_has_feedback_support(dmabuf))
+        return wayland_dmabuf_feedback_get_format_info(dmabuf->default_feedback, drm_format, render_dev, format_info);
+
+    dmabuf_format = dmabuf_format_array_find_format(&dmabuf->formats, drm_format);
+    if (!dmabuf_format) return FALSE;
+
+    format_info->scanoutable = FALSE;
+    format_info->count_modifiers = dmabuf_format_get_modifiers(dmabuf_format, &format_info->modifiers);
+
+    return TRUE;
 }
 
 /***********************************************************************

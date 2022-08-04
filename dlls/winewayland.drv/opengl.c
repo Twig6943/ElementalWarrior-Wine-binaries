@@ -178,8 +178,31 @@ static void wayland_gl_drawable_release(struct wayland_gl_drawable *gl)
 static struct gbm_surface *wayland_gl_create_gbm_surface(int width, int height,
                                                          uint32_t drm_format)
 {
-    return gbm_surface_create(process_gbm_device, width, height, drm_format,
-                              GBM_BO_USE_RENDERING);
+    struct wayland_dmabuf_format_info format_info;
+    dev_t render_dev;
+    struct wayland_dmabuf *dmabuf;
+    struct gbm_surface *gbm_surface = NULL;
+
+    if (!(render_dev = wayland_gbm_get_render_dev()))
+    {
+        ERR("Failed to get device's dev_t from GBM device.\n");
+        goto out;
+    }
+
+    dmabuf = &wayland_process_acquire()->dmabuf;
+
+    if (wayland_dmabuf_get_default_format_info(dmabuf, drm_format, render_dev, &format_info))
+    {
+        gbm_surface = wayland_gbm_create_surface(drm_format, width, height,
+                                                 format_info.count_modifiers,
+                                                 format_info.modifiers,
+                                                 format_info.scanoutable);
+    }
+
+    wayland_process_release();
+
+out:
+    return gbm_surface;
 }
 
 static void wayland_gl_drawable_update(struct wayland_gl_drawable *gl)

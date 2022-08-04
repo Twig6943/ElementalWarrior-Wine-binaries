@@ -29,6 +29,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <drm_fourcc.h>
 #include <fcntl.h>
 #ifdef HAVE_LIBUDEV_H
 #include <libudev.h>
@@ -259,6 +260,58 @@ static char *get_compositor_render_node(void)
 out:
     wayland_process_release();
     return compositor_render_node;
+}
+
+/**********************************************************************
+ *          wayland_gbm_create_surface
+ */
+struct gbm_surface *wayland_gbm_create_surface(uint32_t drm_format, int width, int height,
+                                               size_t count_modifiers, uint64_t *modifiers,
+                                               BOOL format_is_scanoutable)
+{
+    uint32_t gbm_bo_flags = GBM_BO_USE_RENDERING;
+    size_t i;
+
+    if (TRACE_ON(waylanddrv))
+    {
+        TRACE("%dx%d %.4s scanout=%d count_mods=%zu\n",
+              width, height, (const char *)&drm_format,
+              format_is_scanoutable, count_modifiers);
+
+        for (i = 0; i < count_modifiers; i++)
+            TRACE("    mod: 0x%.16llx\n", (long long)modifiers[i]);
+    }
+
+    if (format_is_scanoutable) gbm_bo_flags |= GBM_BO_USE_SCANOUT;
+
+    if (count_modifiers)
+    {
+        struct gbm_surface *surf;
+
+#ifdef HAVE_GBM_SURFACE_CREATE_WITH_MODIFIERS2
+        surf = gbm_surface_create_with_modifiers2(process_gbm_device, width, height,
+                                                  drm_format, modifiers, count_modifiers, gbm_bo_flags);
+#else
+        surf = gbm_surface_create_with_modifiers(process_gbm_device, width, height,
+                                                 drm_format, modifiers, count_modifiers);
+#endif
+        if (surf) return surf;
+
+        TRACE("Failed to create gbm surface with explicit modifiers API " \
+              "(errno=%d), falling back to implicit modifiers API\n", errno);
+
+        for (i = 0; i < count_modifiers; i++)
+            if (modifiers[i] == DRM_FORMAT_MOD_INVALID) break;
+
+        if (i == count_modifiers)
+        {
+            ERR("Will not create gbm surface with implicit modifiers API, as " \
+                "that is not supported by the compositor\n");
+            return NULL;
+        }
+    }
+
+    return gbm_surface_create(process_gbm_device, width, height, drm_format, gbm_bo_flags);
 }
 
 static void wayland_gbm_init_once(void)

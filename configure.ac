@@ -1359,7 +1359,8 @@ else
          AC_CHECK_LIB(xkbcommon,xkb_context_new,[:],[XKBCOMMON_LIBS=""],[$XKBCOMMON_LIBS])])
     WINE_PACKAGE_FLAGS(GBM,[gbm],,,,
         [AC_CHECK_HEADERS([gbm.h])
-         AC_CHECK_LIB(gbm,gbm_create_device,[:],[GBM_LIBS=""],[$GBM_LIBS])])
+         AC_CHECK_LIB(gbm,gbm_create_device,[:],[GBM_LIBS=""],[$GBM_LIBS])
+         WINE_CHECK_LIB_FUNCS(gbm_surface_create_with_modifiers2, [$GBM_LIBS])])
     WINE_PACKAGE_FLAGS(DRM,[libdrm],,,,
         [AC_CHECK_HEADERS([drm.h])
          AC_CHECK_LIB(drm,drmPrimeHandleToFD,[:],[DRM_LIBS=""],[$DRM_LIBS])])

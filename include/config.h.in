@@ -81,6 +81,10 @@
 /* Define to 1 if you have the <gbm.h> header file. */
 #undef HAVE_GBM_H
 
+/* Define to 1 if you have the `gbm_surface_create_with_modifiers2' function.
+   */
+#undef HAVE_GBM_SURFACE_CREATE_WITH_MODIFIERS2
+
 /* Define to 1 if you have the `getaddrinfo' function. */
 #undef HAVE_GETADDRINFO
 

@@ -254,3 +254,50 @@ BOOL WAYLAND_UpdateDisplayDevices(const struct gdi_device_manager *device_manage
 
     return TRUE;
 }
+
+static BOOL wayland_get_current_devmode(struct wayland *wayland, LPCWSTR name, DEVMODEW *mode)
+{
+    struct wayland_output *output;
+
+    output = wayland_output_get_by_wine_name(wayland, name);
+    if (!output || !output->current_mode)
+        return FALSE;
+
+    populate_devmode(output->current_mode, mode);
+
+    mode->dmFields |= DM_POSITION;
+    mode->dmPosition.x = output->x;
+    mode->dmPosition.y = output->y;
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *             GetCurrentDisplaySettings  (WAYLAND.@)
+ *
+ */
+BOOL WAYLAND_GetCurrentDisplaySettings(LPCWSTR name, BOOL is_primary, LPDEVMODEW devmode)
+{
+    struct wayland *wayland = wayland_process_acquire();
+    BOOL ret;
+
+    TRACE("(%s,%p) wayland=%p\n", debugstr_w(name), devmode, wayland);
+
+    ret = wayland_get_current_devmode(wayland, name, devmode);
+
+    wayland_process_release();
+
+    if (ret)
+    {
+        TRACE("=> %d,%d+%ux%u@%u %ubpp\n",
+              (int)devmode->dmPosition.x, (int)devmode->dmPosition.y,
+              (UINT)devmode->dmPelsWidth, (UINT)devmode->dmPelsHeight,
+              (UINT)devmode->dmDisplayFrequency, (UINT)devmode->dmBitsPerPel);
+    }
+    else
+    {
+        ERR("Failed to get %s current display settings.\n", wine_dbgstr_w(name));
+    }
+
+    return ret;
+}

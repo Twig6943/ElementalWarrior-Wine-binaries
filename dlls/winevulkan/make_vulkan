@@ -107,14 +107,9 @@ UNSUPPORTED_EXTENSIONS = [
     "VK_NV_external_memory_rdma", # Needs shared resources work.
 
     # Extensions for other platforms
-    "VK_EXT_external_memory_dma_buf",
-    "VK_EXT_image_drm_format_modifier",
     "VK_EXT_metal_objects",
     "VK_EXT_physical_device_drm",
     "VK_GOOGLE_surfaceless_query",
-    "VK_KHR_external_fence_fd",
-    "VK_KHR_external_memory_fd",
-    "VK_KHR_external_semaphore_fd",
     "VK_SEC_amigo_profiling", # Angle specific.
 
     # Extensions which require callback handling
@@ -130,6 +125,11 @@ UNSUPPORTED_EXTENSIONS = [
 # but not expose to applications (useful for test commits)
 UNEXPOSED_EXTENSIONS = {
     "VK_KHR_external_memory_win32",
+    "VK_EXT_external_memory_dma_buf",
+    "VK_EXT_image_drm_format_modifier",
+    "VK_KHR_external_fence_fd",
+    "VK_KHR_external_memory_fd",
+    "VK_KHR_external_semaphore_fd",
 }
 
 # The Vulkan loader provides entry-points for core functionality and important
@@ -189,7 +189,7 @@ FUNCTION_OVERRIDES = {
     "vkGetInstanceProcAddr": {"dispatch" : False, "driver" : True, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.NONE},
 
     # Instance functions
-    "vkCreateDevice" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE, "extra_param" : "client_ptr"},
+    "vkCreateDevice" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE, "extra_param" : "client_ptr"},
     "vkDestroyInstance" : {"dispatch" : False, "driver" : True, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
     "vkEnumerateDeviceExtensionProperties" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE},
     "vkEnumerateDeviceLayerProperties": {"dispatch": True, "driver": False, "thunk": ThunkType.NONE},
@@ -206,7 +206,7 @@ FUNCTION_OVERRIDES = {
     "vkAllocateCommandBuffers" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
     "vkCreateCommandPool" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE, "extra_param" : "client_ptr"},
     "vkDestroyCommandPool" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
-    "vkDestroyDevice" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
+    "vkDestroyDevice" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
     "vkFreeCommandBuffers" : {"dispatch" : True, "driver" : False, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.PRIVATE},
     "vkGetDeviceProcAddr" : {"dispatch" : False, "driver" : True, "thunk" : ThunkType.NONE, "loader_thunk" : ThunkType.NONE},
     "vkGetDeviceQueue" : {"dispatch": True, "driver" : False, "thunk" : ThunkType.NONE},
@@ -234,6 +234,7 @@ FUNCTION_OVERRIDES = {
     "vkGetPhysicalDeviceWin32PresentationSupportKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
 
     # VK_KHR_swapchain
+    "vkAcquireNextImageKHR": {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
     "vkCreateSwapchainKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
     "vkDestroySwapchainKHR" : {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},
     "vkGetSwapchainImagesKHR": {"dispatch" : True, "driver" : True, "thunk" : ThunkType.PUBLIC},

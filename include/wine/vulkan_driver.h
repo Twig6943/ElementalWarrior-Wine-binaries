@@ -21,9 +21,12 @@ struct vulkan_funcs
      * needs to provide. Other function calls will be provided indirectly by dispatch
      * tables part of dispatchable Vulkan objects such as VkInstance or vkDevice.
      */
+    VkResult (*p_vkAcquireNextImageKHR)(VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t *);
+    VkResult (*p_vkCreateDevice)(VkPhysicalDevice, const VkDeviceCreateInfo *, const VkAllocationCallbacks *, VkDevice *);
     VkResult (*p_vkCreateInstance)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *, VkInstance *);
     VkResult (*p_vkCreateSwapchainKHR)(VkDevice, const VkSwapchainCreateInfoKHR *, const VkAllocationCallbacks *, VkSwapchainKHR *);
     VkResult (*p_vkCreateWin32SurfaceKHR)(VkInstance, const VkWin32SurfaceCreateInfoKHR *, const VkAllocationCallbacks *, VkSurfaceKHR *);
+    void (*p_vkDestroyDevice)(VkDevice, const VkAllocationCallbacks *);
     void (*p_vkDestroyInstance)(VkInstance, const VkAllocationCallbacks *);
     void (*p_vkDestroySurfaceKHR)(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
     void (*p_vkDestroySwapchainKHR)(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks *);
@@ -55,8 +58,12 @@ static inline void *get_vulkan_driver_device_proc_addr(
 
     name += 2;
 
+    if (!strcmp(name, "AcquireNextImageKHR"))
+        return vulkan_funcs->p_vkAcquireNextImageKHR;
     if (!strcmp(name, "CreateSwapchainKHR"))
         return vulkan_funcs->p_vkCreateSwapchainKHR;
+    if (!strcmp(name, "DestroyDevice"))
+        return vulkan_funcs->p_vkDestroyDevice;
     if (!strcmp(name, "DestroySwapchainKHR"))
         return vulkan_funcs->p_vkDestroySwapchainKHR;
     if (!strcmp(name, "GetDeviceGroupSurfacePresentModesKHR"))
@@ -85,6 +92,8 @@ static inline void *get_vulkan_driver_instance_proc_addr(
 
     if (!instance) return NULL;
 
+    if (!strcmp(name, "CreateDevice"))
+        return vulkan_funcs->p_vkCreateDevice;
     if (!strcmp(name, "CreateWin32SurfaceKHR"))
         return vulkan_funcs->p_vkCreateWin32SurfaceKHR;
     if (!strcmp(name, "DestroyInstance"))

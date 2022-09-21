@@ -41,5 +41,9 @@ void wayland_remote_vk_swapchain_destroy(struct wayland_remote_vk_swapchain *swa
                                          VkDevice device) DECLSPEC_HIDDEN;
 VkResult wayland_remote_vk_swapchain_get_images(struct wayland_remote_vk_swapchain *swapchain,
                                                 uint32_t *count, VkImage *images) DECLSPEC_HIDDEN;
+VkResult wayland_remote_vk_swapchain_acquire_next_image(struct wayland_remote_vk_swapchain *swapchain,
+                                                        VkDevice device, uint64_t timeout_ns,
+                                                        VkSemaphore semaphore, VkFence fence,
+                                                        uint32_t *image_index) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_WAYLANDDRV_VULKAN_REMOTE_H */

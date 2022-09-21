@@ -48,6 +48,8 @@ struct vk_funcs
     PFN_vkBindImageMemory p_vkBindImageMemory;
     PFN_vkGetImageMemoryRequirements p_vkGetImageMemoryRequirements;
     PFN_vkGetPhysicalDeviceMemoryProperties p_vkGetPhysicalDeviceMemoryProperties;
+    PFN_vkImportSemaphoreFdKHR p_vkImportSemaphoreFdKHR;
+    PFN_vkImportFenceFdKHR p_vkImportFenceFdKHR;
 };
 
 struct wayland_remote_vk_image
@@ -56,14 +58,39 @@ struct wayland_remote_vk_image
     VkDeviceMemory native_vk_image_memory;
     VkFormat format;
     uint32_t width, height;
+    BOOL busy;
+    HANDLE remote_buffer_released_event;
 };
 
 struct wayland_remote_vk_swapchain
 {
     struct vk_funcs vk_funcs;
+    struct wayland_remote_surface_proxy *remote_surface_proxy;
     uint32_t count_images;
     struct wayland_remote_vk_image *images;
 };
+
+/* Convert timeout in ms to the timeout format used by ntdll which is:
+ * 100ns units, negative for monotonic time. */
+static inline LARGE_INTEGER *get_nt_timeout(LARGE_INTEGER *time, int timeout_ms)
+{
+    if (timeout_ms == -1)
+        return NULL;
+
+    time->QuadPart = (ULONGLONG)timeout_ms * -10000;
+
+    return time;
+}
+
+static UINT get_tick_count_since(UINT start)
+{
+    UINT now = NtGetTickCount();
+    /* Handle tick count wrap around to zero. */
+    if (now < start)
+        return 0xffffffff - start + now + 1;
+    else
+        return now - start;
+}
 
 static int get_image_create_flags(VkSwapchainCreateInfoKHR *chain_create_info)
 {
@@ -201,8 +228,10 @@ static void wayland_remote_vk_image_deinit(VkDevice device, struct vk_funcs *vk_
 {
     vk_funcs->p_vkDestroyImage(device, image->native_vk_image, NULL);
     vk_funcs->p_vkFreeMemory(device, image->native_vk_image_memory, NULL);
-}
 
+    if (image->remote_buffer_released_event)
+        NtClose(image->remote_buffer_released_event);
+}
 
 static int wayland_remote_vk_image_init(VkInstance instance, VkPhysicalDevice physical_device,
                                         VkDevice device, struct vk_funcs *vk_funcs,
@@ -216,6 +245,8 @@ static int wayland_remote_vk_image_init(VkInstance instance, VkPhysicalDevice ph
     image->format = create_info->imageFormat;
     image->width = create_info->imageExtent.width;
     image->height = create_info->imageExtent.height;
+    image->busy = FALSE;
+    image->remote_buffer_released_event = 0;
 
     image->native_vk_image = create_vulkan_image(device, vk_funcs, create_info);
     if (image->native_vk_image == VK_NULL_HANDLE)
@@ -243,9 +274,23 @@ err:
     return -1;
 }
 
+static void wayland_remote_vk_image_release(struct wayland_remote_vk_image *image)
+{
+    if (image->remote_buffer_released_event)
+    {
+        NtClose(image->remote_buffer_released_event);
+        image->remote_buffer_released_event = 0;
+    }
+
+    image->busy = FALSE;
+}
+
 void wayland_remote_vk_swapchain_destroy(struct wayland_remote_vk_swapchain *swapchain,
                                          VkDevice device)
 {
+    if (swapchain->remote_surface_proxy)
+        wayland_remote_surface_proxy_destroy(swapchain->remote_surface_proxy);
+
     if (swapchain->images)
     {
         unsigned int i;
@@ -292,9 +337,19 @@ struct wayland_remote_vk_swapchain *wayland_remote_vk_swapchain_create(HWND hwnd
     LOAD_DEVICE_FUNCPTR(vkBindImageMemory);
     LOAD_DEVICE_FUNCPTR(vkGetImageMemoryRequirements);
     LOAD_INSTANCE_FUNCPTR(vkGetPhysicalDeviceMemoryProperties);
+    LOAD_DEVICE_FUNCPTR(vkImportSemaphoreFdKHR);
+    LOAD_DEVICE_FUNCPTR(vkImportFenceFdKHR);
 
 #undef LOAD_DEVICE_FUNCPTR
 #undef LOAD_INSTANCE_FUNCPTR
+
+    swapchain->remote_surface_proxy =
+        wayland_remote_surface_proxy_create(hwnd, WAYLAND_REMOTE_SURFACE_TYPE_GLVK);
+    if (!swapchain->remote_surface_proxy)
+    {
+        ERR("Failed to create remote surface proxy for remote swapchain\n");
+        goto err;
+    }
 
     swapchain->count_images = max(create_info->minImageCount, min_number_images);
     swapchain->images = calloc(swapchain->count_images, sizeof(*swapchain->images));
@@ -346,4 +401,176 @@ VkResult wayland_remote_vk_swapchain_get_images(struct wayland_remote_vk_swapcha
         images[i] = swapchain->images[i].native_vk_image;
 
     return res;
+}
+
+static DWORD wait_remote_release_buffer_events(struct wayland_remote_vk_swapchain *swapchain,
+                                               int timeout_ms)
+{
+    int count = 0;
+    HANDLE *handles;
+    struct wayland_remote_vk_image *image;
+    struct wayland_remote_vk_image **images;
+    unsigned int i;
+    LARGE_INTEGER timeout;
+    UINT ret = WAIT_OBJECT_0;
+
+    handles = calloc(swapchain->count_images, sizeof(*handles));
+    images = calloc(swapchain->count_images, sizeof(*images));
+    if (!handles || !images)
+    {
+        ERR("Failed to allocate memory\n");
+        ret = WAIT_FAILED;
+        goto out;
+    }
+
+    if (!wayland_remote_surface_proxy_dispatch_events(swapchain->remote_surface_proxy))
+    {
+        ret = WAIT_FAILED;
+        goto out;
+    }
+
+    for (i = 0; i < swapchain->count_images; i++)
+    {
+        image = &swapchain->images[i];
+        if (!image->remote_buffer_released_event)
+            continue;
+        images[count] = image;
+        handles[count] = image->remote_buffer_released_event;
+        count++;
+    }
+    TRACE("count handles=%d\n", count);
+    for (i = 0; i < count; i++)
+        TRACE("handle%d=%p\n", i, handles[i]);
+
+    /* Nothing to wait for, so just return */
+    if (count == 0)
+        goto out;
+
+    ret = NtWaitForMultipleObjects(count, handles, TRUE, FALSE,
+                                   get_nt_timeout(&timeout, timeout_ms));
+    if (ret == WAIT_FAILED)
+    {
+        ERR("Failed on NtWaitForMultipleObjects() call, ret=%d\n", ret);
+        goto out;
+    }
+    TRACE("count=%d => ret=%d\n", count, ret);
+
+    i = ret - WAIT_OBJECT_0;
+    if (i < count)
+        wayland_remote_vk_image_release(images[i]);
+
+out:
+    if (ret == WAIT_FAILED)
+        ERR("Failed to wait for remote release buffer event\n");
+    free(handles);
+    free(images);
+    return ret;
+}
+
+VkResult wayland_remote_vk_swapchain_acquire_next_image(struct wayland_remote_vk_swapchain *swapchain,
+                                                        VkDevice device, uint64_t timeout_ns,
+                                                        VkSemaphore semaphore, VkFence fence,
+                                                        uint32_t *image_index)
+{
+    struct vk_funcs *vk_funcs = &swapchain->vk_funcs;
+    unsigned int i;
+    BOOL free_image_found = FALSE;
+    VkImportSemaphoreFdInfoKHR import_semaphore_fd_info = {0};
+    VkImportFenceFdInfoKHR import_fence_fd_info = {0};
+    VkResult res;
+    static const UINT wait_timeout = 100;
+    UINT wait_start = NtGetTickCount();
+
+    /* As we are not the Vulkan driver, we don't have much information about the
+     * semaphore. But the spec of VkImportSemaphoreFdInfoKHR states the
+     * following:
+     *
+     * If handleType is VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT, the
+     * special value -1 for fd is treated like a valid sync file descriptor
+     * referring to an object that has already signaled. The import operation
+     * will succeed and the VkSemaphore will have a temporarily imported payload
+     * as if a valid file descriptor had been provided.
+     *
+     * This special behavior allows us to signal the semaphore by setting
+     * import_semaphore_fd_info.fd to -1. Same thing applies to VkFence, so we
+     * set import_fence_fd_info.fd to -1 */
+
+    import_semaphore_fd_info.sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR;
+    import_semaphore_fd_info.fd = -1;
+    import_semaphore_fd_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+    import_semaphore_fd_info.semaphore = semaphore;
+    import_semaphore_fd_info.flags = VK_SEMAPHORE_IMPORT_TEMPORARY_BIT;
+
+    import_fence_fd_info.sType = VK_STRUCTURE_TYPE_IMPORT_FENCE_FD_INFO_KHR;
+    import_fence_fd_info.fd = -1;
+    import_fence_fd_info.handleType = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT;
+    import_fence_fd_info.fence = fence;
+    import_fence_fd_info.flags = VK_FENCE_IMPORT_TEMPORARY_BIT;
+
+    /* Wait until we have a free image. If we don't get a free buffer within
+     * wait_timeout, drop the first buffer to ensure we can continue and avoid
+     * potential cross-process deadlocks (e.g., the render process waiting for
+     * the window process to dispatch buffer release messages, while the window
+     * process is waiting for the render process to finish rendering). */
+    while (!free_image_found)
+    {
+        for (i = 0; i < swapchain->count_images; i++)
+            if (!swapchain->images[i].busy)
+            {
+                free_image_found = TRUE;
+                break;
+            }
+
+        if (!free_image_found)
+        {
+            /* If timeout is 0, the spec says that we should return VK_NOT_READY
+             * when no images are available. */
+            if (timeout_ns == 0)
+                return VK_NOT_READY;
+
+            if (wait_remote_release_buffer_events(swapchain, 10) == WAIT_FAILED)
+                goto err;
+
+            /* Release image so that we can continue */
+            if (get_tick_count_since(wait_start) > wait_timeout)
+            {
+                i = 0;
+                free_image_found = TRUE;
+                wayland_remote_vk_image_release(&swapchain->images[i]);
+            }
+        }
+
+        /* If applications defined a timeout, we must respect it */
+        if (!free_image_found && timeout_ns > 0 &&
+            get_tick_count_since(wait_start) > (timeout_ns / 1000000))
+            return VK_TIMEOUT;
+    }
+
+    if (semaphore != VK_NULL_HANDLE)
+    {
+        res = vk_funcs->p_vkImportSemaphoreFdKHR(device, &import_semaphore_fd_info);
+        if (res != VK_SUCCESS)
+        {
+            ERR("pfn_vkImportSemaphoreFdKHR failed, res=%d\n", res);
+            goto err;
+        }
+    }
+    if (fence != VK_NULL_HANDLE)
+    {
+        res = vk_funcs->p_vkImportFenceFdKHR(device, &import_fence_fd_info);
+        if (res != VK_SUCCESS)
+        {
+            ERR("pfn_vkImportFenceFdKHR failed, res=%d\n", res);
+            goto err;
+        }
+    }
+
+    *image_index = i;
+    swapchain->images[*image_index].busy = TRUE;
+
+    return VK_SUCCESS;
+
+err:
+    ERR("Failed to acquire image from remote Vulkan swapchain");
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
 }

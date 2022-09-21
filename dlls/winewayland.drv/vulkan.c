@@ -101,12 +101,19 @@ static const struct vulkan_funcs vulkan_funcs;
  * might not be supported by the device, so we must check. */
 const static char *instance_extensions_remote_vulkan[] =
 {
+    "VK_KHR_external_fence_capabilities",
+    "VK_KHR_external_semaphore_capabilities",
+    "VK_KHR_get_physical_device_properties2",
 };
 
 /* These device extensions are required to support Vulkan remote. Some of them
  * might not be supported by the device, so we must check. */
 const static char *device_extensions_remote_vulkan[] =
 {
+    "VK_KHR_external_fence",
+    "VK_KHR_external_fence_fd",
+    "VK_KHR_external_semaphore",
+    "VK_KHR_external_semaphore_fd",
 };
 
 struct wine_vk_device
@@ -1093,9 +1100,16 @@ static VkResult wayland_vkAcquireNextImageKHR(VkDevice device, VkSwapchainKHR sw
                                               uint64_t timeout, VkSemaphore semaphore,
                                               VkFence fence, uint32_t *image_index)
 {
+    struct wine_vk_swapchain *wine_vk_swapchain = wine_vk_swapchain_from_handle(swapchain);
+
     TRACE("%p 0x%s 0x%s 0x%s 0x%s %p\n",
           device, wine_dbgstr_longlong(swapchain), wine_dbgstr_longlong(timeout),
           wine_dbgstr_longlong(semaphore), wine_dbgstr_longlong(fence), image_index);
+
+    if (wine_vk_swapchain_is_remote(wine_vk_swapchain))
+        return wayland_remote_vk_swapchain_acquire_next_image(wine_vk_swapchain->remote_vk_swapchain,
+                                                              wine_vk_swapchain->wine_vk_device->dev,
+                                                              timeout, semaphore, fence, image_index);
 
     return pvkAcquireNextImageKHR(device, swapchain, timeout, semaphore, fence, image_index);
 }

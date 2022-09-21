@@ -45,6 +45,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
 #define VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR 1000006000
 
+/* This is temporary until we fully support remote (cross-process) Vulkan
+ * rendering, as we are progressively adding commits that add the support. */
+static const BOOL remote_rendering_supported = FALSE;
+
 typedef struct VkWaylandSurfaceCreateInfoKHR
 {
     VkStructureType sType;
@@ -116,6 +120,9 @@ struct wine_vk_surface
     struct wl_list link;
     HWND hwnd;
     struct wayland_surface *wayland_surface;
+    /* Used when we are rendering cross-process and we don't have the real
+     * wayland surface available. */
+    struct wl_surface *dummy_wl_surface;
     VkSurfaceKHR native_vk_surface;
     BOOL valid;
 };
@@ -150,6 +157,8 @@ static void wine_vk_surface_destroy(struct wine_vk_surface *wine_vk_surface)
 
     if (wine_vk_surface->wayland_surface)
         wayland_surface_unref_glvk(wine_vk_surface->wayland_surface);
+    if (wine_vk_surface->dummy_wl_surface)
+        wl_surface_destroy(wine_vk_surface->dummy_wl_surface);
 
     free(wine_vk_surface);
 }
@@ -599,31 +608,54 @@ static VkResult wayland_vkCreateWin32SurfaceKHR(VkInstance instance,
     wl_list_init(&wine_vk_surface->link);
 
     wayland_surface = wayland_surface_for_hwnd_lock(create_info->hwnd);
-    if (!wayland_surface)
+    if (wayland_surface)
     {
-        ERR("Failed to find wayland surface for hwnd=%p\n", create_info->hwnd);
-        /* VK_KHR_win32_surface only allows out of host and device memory as errors. */
+        ref_vk = wayland_surface_create_or_ref_glvk(wayland_surface);
+        wayland_surface_for_hwnd_unlock(wayland_surface);
+        if (!ref_vk)
+        {
+            ERR("Failed to create or ref vulkan surface for hwnd=%p\n", create_info->hwnd);
+            res = VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto err;
+        }
+        wine_vk_surface->wayland_surface = wayland_surface;
+    }
+    else if (remote_rendering_supported)
+    {
+        struct wayland *wayland;
+        if (!vulkan_instance_supports(ARRAY_SIZE(instance_extensions_remote_vulkan),
+                                      instance_extensions_remote_vulkan))
+        {
+            ERR("Failed to create remote Vulkan surface, required extensions " \
+                "not supported by VkInstance %p\n", instance);
+            res = VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto err;
+        }
+        wayland = wayland_process_acquire();
+        wine_vk_surface->dummy_wl_surface =
+            wl_compositor_create_surface(wayland->wl_compositor);
+        wayland_process_release();
+        if (!wine_vk_surface->dummy_wl_surface)
+        {
+            res = VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto err;
+        }
+    }
+    else
+    {
+        ERR("Failed to create surface, cross-process Vulkan rendering not supported yet\n");
         res = VK_ERROR_OUT_OF_HOST_MEMORY;
         goto err;
     }
-
-    ref_vk = wayland_surface_create_or_ref_glvk(wayland_surface);
-    wayland_surface_for_hwnd_unlock(wayland_surface);
-    if (!ref_vk)
-    {
-        ERR("Failed to create or ref vulkan surface for hwnd=%p\n", create_info->hwnd);
-        /* VK_KHR_win32_surface only allows out of host and device memory as errors. */
-        res = VK_ERROR_OUT_OF_HOST_MEMORY;
-        goto err;
-    }
-
-    wine_vk_surface->wayland_surface = wayland_surface;
 
     create_info_host.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
     create_info_host.pNext = NULL;
     create_info_host.flags = 0; /* reserved */
     create_info_host.display = process_wl_display;
-    create_info_host.surface = wayland_surface->glvk->wl_surface;
+    if (wine_vk_surface->wayland_surface)
+        create_info_host.surface = wine_vk_surface->wayland_surface->glvk->wl_surface;
+    else
+        create_info_host.surface = wine_vk_surface->dummy_wl_surface;
 
     res = pvkCreateWaylandSurfaceKHR(instance, &create_info_host, NULL /* allocator */, vk_surface);
     if (res != VK_SUCCESS)

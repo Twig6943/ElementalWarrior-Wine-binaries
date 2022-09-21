@@ -45,5 +45,7 @@ VkResult wayland_remote_vk_swapchain_acquire_next_image(struct wayland_remote_vk
                                                         VkDevice device, uint64_t timeout_ns,
                                                         VkSemaphore semaphore, VkFence fence,
                                                         uint32_t *image_index) DECLSPEC_HIDDEN;
+int wayland_remote_vk_swapchain_present(struct wayland_remote_vk_swapchain *swapchain,
+                                        uint32_t image_index) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_WAYLANDDRV_VULKAN_REMOTE_H */

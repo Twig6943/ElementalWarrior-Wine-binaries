@@ -35,6 +35,7 @@
 
 #include "vulkan_remote.h"
 
+#include <drm_fourcc.h>
 #include <stdlib.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
@@ -50,6 +51,8 @@ struct vk_funcs
     PFN_vkGetPhysicalDeviceMemoryProperties p_vkGetPhysicalDeviceMemoryProperties;
     PFN_vkImportSemaphoreFdKHR p_vkImportSemaphoreFdKHR;
     PFN_vkImportFenceFdKHR p_vkImportFenceFdKHR;
+    PFN_vkGetMemoryFdKHR p_vkGetMemoryFdKHR;
+    PFN_vkGetImageSubresourceLayout p_vkGetImageSubresourceLayout;
 };
 
 struct wayland_remote_vk_image
@@ -59,6 +62,7 @@ struct wayland_remote_vk_image
     VkFormat format;
     uint32_t width, height;
     BOOL busy;
+    struct wayland_native_buffer native_buffer;
     HANDLE remote_buffer_released_event;
 };
 
@@ -68,6 +72,21 @@ struct wayland_remote_vk_swapchain
     struct wayland_remote_surface_proxy *remote_surface_proxy;
     uint32_t count_images;
     struct wayland_remote_vk_image *images;
+};
+
+struct drm_vk_format
+{
+    VkFormat vk_format;
+    VkFormat vk_format_srgb;
+    uint32_t drm_format;
+    uint32_t drm_format_alpha;
+};
+
+/* List of Vulkan formats that we know, and the corresponding DRM formats */
+const static struct drm_vk_format format_table[] =
+{
+    {VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB, DRM_FORMAT_XBGR8888, DRM_FORMAT_ABGR8888},
+    {VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_B8G8R8A8_SRGB, DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888},
 };
 
 /* Convert timeout in ms to the timeout format used by ntdll which is:
@@ -90,6 +109,68 @@ static UINT get_tick_count_since(UINT start)
         return 0xffffffff - start + now + 1;
     else
         return now - start;
+}
+
+static uint32_t vulkan_format_to_drm_format(VkFormat format, BOOL ignore_alpha)
+{
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(format_table); i++)
+    {
+        const struct drm_vk_format *dvf = &format_table[i];
+        if (dvf->vk_format == format || dvf->vk_format_srgb == format)
+            return ignore_alpha ? dvf->drm_format : dvf->drm_format_alpha;
+    }
+
+    return DRM_FORMAT_INVALID;
+}
+
+static int wayland_native_buffer_init_vk(VkInstance instance, VkPhysicalDevice physical_device,
+                                         VkDevice device, struct vk_funcs *vk_funcs,
+                                         BOOL ignore_alpha, struct wayland_remote_vk_image *image)
+{
+    struct wayland_native_buffer *buffer = &image->native_buffer;
+    VkMemoryGetFdInfoKHR memory_get_fd_info = {0};
+    VkSubresourceLayout layout;
+    VkImageSubresource image_subresource = {0};
+    VkResult res;
+
+    buffer->modifier = DRM_FORMAT_MOD_LINEAR;
+    buffer->plane_count = 1;
+
+    memory_get_fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+    memory_get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+    memory_get_fd_info.memory = image->native_vk_image_memory;
+
+    res = vk_funcs->p_vkGetMemoryFdKHR(device, &memory_get_fd_info, &buffer->fds[0]);
+    if (res != VK_SUCCESS)
+    {
+        buffer->fds[0] = -1;
+        ERR("pfn_vkGetMemoryFdKHR failed, res=%d\n", res);
+        goto err;
+    }
+
+    image_subresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    vk_funcs->p_vkGetImageSubresourceLayout(device, image->native_vk_image,
+                                            &image_subresource, &layout);
+    buffer->offsets[0] = layout.offset;
+    buffer->strides[0] = layout.rowPitch;
+
+    buffer->format = vulkan_format_to_drm_format(image->format, ignore_alpha);
+    if (buffer->format == DRM_FORMAT_INVALID)
+    {
+        ERR("Failed to get corresponding DRM format for Vulkan format %d\n", image->format);
+        goto err;
+    }
+    buffer->width = image->width;
+    buffer->height = image->height;
+
+    return 0;
+
+err:
+    wayland_native_buffer_deinit(buffer);
+    ERR("Failed to init wayland_native_buffer for Vulkan image\n");
+    return -1;
 }
 
 static int get_image_create_flags(VkSwapchainCreateInfoKHR *chain_create_info)
@@ -231,6 +312,8 @@ static void wayland_remote_vk_image_deinit(VkDevice device, struct vk_funcs *vk_
 
     if (image->remote_buffer_released_event)
         NtClose(image->remote_buffer_released_event);
+
+    wayland_native_buffer_deinit(&image->native_buffer);
 }
 
 static int wayland_remote_vk_image_init(VkInstance instance, VkPhysicalDevice physical_device,
@@ -239,6 +322,8 @@ static int wayland_remote_vk_image_init(VkInstance instance, VkPhysicalDevice ph
                                         struct wayland_remote_vk_image *image)
 {
     VkResult res;
+    BOOL ignore_alpha;
+    unsigned int i;
 
     image->native_vk_image = VK_NULL_HANDLE;
     image->native_vk_image_memory = VK_NULL_HANDLE;
@@ -247,6 +332,8 @@ static int wayland_remote_vk_image_init(VkInstance instance, VkPhysicalDevice ph
     image->height = create_info->imageExtent.height;
     image->busy = FALSE;
     image->remote_buffer_released_event = 0;
+    for (i = 0; i < ARRAY_SIZE(image->native_buffer.fds); i++)
+        image->native_buffer.fds[i] = -1;
 
     image->native_vk_image = create_vulkan_image(device, vk_funcs, create_info);
     if (image->native_vk_image == VK_NULL_HANDLE)
@@ -265,6 +352,11 @@ static int wayland_remote_vk_image_init(VkInstance instance, VkPhysicalDevice ph
         ERR("pfn_vkBindImageMemory failed, res=%d\n", res);
         goto err;
     }
+
+    ignore_alpha = create_info->compositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    if (wayland_native_buffer_init_vk(instance, physical_device, device, vk_funcs,
+                                      ignore_alpha, image) < 0)
+        goto err;
 
     return 0;
 
@@ -339,6 +431,8 @@ struct wayland_remote_vk_swapchain *wayland_remote_vk_swapchain_create(HWND hwnd
     LOAD_INSTANCE_FUNCPTR(vkGetPhysicalDeviceMemoryProperties);
     LOAD_DEVICE_FUNCPTR(vkImportSemaphoreFdKHR);
     LOAD_DEVICE_FUNCPTR(vkImportFenceFdKHR);
+    LOAD_DEVICE_FUNCPTR(vkGetMemoryFdKHR);
+    LOAD_DEVICE_FUNCPTR(vkGetImageSubresourceLayout);
 
 #undef LOAD_DEVICE_FUNCPTR
 #undef LOAD_INSTANCE_FUNCPTR
@@ -573,4 +667,30 @@ VkResult wayland_remote_vk_swapchain_acquire_next_image(struct wayland_remote_vk
 err:
     ERR("Failed to acquire image from remote Vulkan swapchain");
     return VK_ERROR_OUT_OF_HOST_MEMORY;
+}
+
+int wayland_remote_vk_swapchain_present(struct wayland_remote_vk_swapchain *swapchain,
+                                        uint32_t image_index)
+{
+    struct wayland_remote_vk_image *image;
+
+    image = &swapchain->images[image_index];
+    image->busy = TRUE;
+
+    if (!wayland_remote_surface_proxy_commit(swapchain->remote_surface_proxy,
+                                             &image->native_buffer,
+                                             WAYLAND_REMOTE_BUFFER_TYPE_DMABUF,
+                                             WAYLAND_REMOTE_BUFFER_COMMIT_NORMAL,
+                                             &image->remote_buffer_released_event,
+                                             NULL))
+    {
+        wayland_remote_vk_image_release(image);
+        goto err;
+    }
+
+    return 0;
+
+err:
+    ERR("Failed to present remote Vulkan swapchain\n");
+    return -1;
 }

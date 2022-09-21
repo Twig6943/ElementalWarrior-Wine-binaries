@@ -37,8 +37,12 @@
 #include "wine/vulkan_driver.h"
 #include "vulkan_remote.h"
 
+#include <assert.h>
 #include <dlfcn.h>
+#include <errno.h>
+#include <poll.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
@@ -102,6 +106,7 @@ static const struct vulkan_funcs vulkan_funcs;
 const static char *instance_extensions_remote_vulkan[] =
 {
     "VK_KHR_external_fence_capabilities",
+    "VK_KHR_external_memory_capabilities",
     "VK_KHR_external_semaphore_capabilities",
     "VK_KHR_get_physical_device_properties2",
 };
@@ -112,6 +117,8 @@ const static char *device_extensions_remote_vulkan[] =
 {
     "VK_KHR_external_fence",
     "VK_KHR_external_fence_fd",
+    "VK_KHR_external_memory",
+    "VK_KHR_external_memory_fd",
     "VK_KHR_external_semaphore",
     "VK_KHR_external_semaphore_fd",
 };
@@ -148,6 +155,7 @@ struct wine_vk_swapchain
     BOOL valid;
     /* Only used for cross-process Vulkan rendering apps. */
     struct wayland_remote_vk_swapchain *remote_vk_swapchain;
+    PFN_vkGetSemaphoreFdKHR p_vkGetSemaphoreFdKHR;
 };
 
 static inline void wine_vk_list_add(struct wl_list *list, struct wl_list *link)
@@ -622,6 +630,13 @@ static VkResult wayland_vkCreateSwapchainKHR(VkDevice device,
                                                &vulkan_funcs,
                                                &info);
         if (!wine_vk_swapchain->remote_vk_swapchain)
+        {
+            res = VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto err;
+        }
+        wine_vk_swapchain->p_vkGetSemaphoreFdKHR =
+            pvkGetDeviceProcAddr(device, "vkGetSemaphoreFdKHR");
+        if (!wine_vk_swapchain->p_vkGetSemaphoreFdKHR)
         {
             res = VK_ERROR_OUT_OF_HOST_MEMORY;
             goto err;
@@ -1124,17 +1139,37 @@ static VkResult validate_present_info(const VkPresentInfoKHR *present_info)
         const VkSwapchainKHR vk_swapchain = present_info->pSwapchains[i];
         struct wine_vk_swapchain *wine_vk_swapchain =
             wine_vk_swapchain_from_handle(vk_swapchain);
-        BOOL drawing_allowed =
-            (wine_vk_swapchain && wine_vk_swapchain->wayland_surface) ?
-            wine_vk_swapchain->wayland_surface->drawing_allowed : TRUE;
+        BOOL drawing_allowed;
         RECT client;
 
+        if (!wine_vk_swapchain)
+        {
+            drawing_allowed = FALSE;
+        }
+        else
+        {
+            if (wine_vk_swapchain_is_remote(wine_vk_swapchain))
+            {
+                /* For cross-process swapchains, we don't have the information
+                 * of drawing_allowed. So we assume it is TRUE. That is safe to
+                 * do because the process that will call wl_surface_commit()
+                 * won't commit anything when drawing_allowed == FALSE. */
+                drawing_allowed = TRUE;
+            }
+            else
+            {
+                assert(wine_vk_swapchain->wayland_surface);
+                drawing_allowed = wine_vk_swapchain->wayland_surface->drawing_allowed;
+            }
+        }
+
         TRACE("swapchain[%d] vk=0x%s wine=%p extent=%dx%d wayland_surface=%p "
-               "drawing_allowed=%d\n",
+               "remote_swapchain=%p drawing_allowed=%d\n",
                i, wine_dbgstr_longlong(vk_swapchain), wine_vk_swapchain,
                wine_vk_swapchain ? wine_vk_swapchain->extent.width : 0,
                wine_vk_swapchain ? wine_vk_swapchain->extent.height : 0,
                wine_vk_swapchain ? wine_vk_swapchain->wayland_surface : NULL,
+               wine_vk_swapchain ? wine_vk_swapchain->remote_vk_swapchain : NULL,
                drawing_allowed);
 
         if (!wine_vk_swapchain ||
@@ -1153,7 +1188,7 @@ static VkResult validate_present_info(const VkPresentInfoKHR *present_info)
         /* Since Vulkan content is presented on a Wayland subsurface, we need
          * to ensure the parent Wayland surface is mapped for the Vulkan
          * content to be visible. */
-        if (wine_vk_swapchain->wayland_surface && drawing_allowed)
+        if (drawing_allowed && !wine_vk_swapchain_is_remote(wine_vk_swapchain))
             wayland_surface_ensure_mapped(wine_vk_swapchain->wayland_surface);
     }
 
@@ -1189,9 +1224,77 @@ static void lock_swapchain_wayland_surfaces(const VkPresentInfoKHR *present_info
     }
 }
 
+static int queue_present_wait_semaphores(struct wine_vk_swapchain *swapchain,
+                                         const VkPresentInfoKHR *present_info)
+{
+    struct pollfd pollfd;
+    int semaphore_fd = -1;
+    unsigned int i;
+    int ret;
+    VkSemaphoreGetFdInfoKHR get_fd_info = {0};
+    VkResult res;
+
+    if (present_info->waitSemaphoreCount == 0)
+        return 0;
+
+    get_fd_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
+    get_fd_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+
+    for (i = 0; i < present_info->waitSemaphoreCount; i++)
+    {
+        /* Current semaphore to wait for */
+        get_fd_info.semaphore = present_info->pWaitSemaphores[i];
+
+        res = swapchain->p_vkGetSemaphoreFdKHR(swapchain->wine_vk_device->dev,
+                                               &get_fd_info, &semaphore_fd);
+        if (res != VK_SUCCESS)
+        {
+            ERR("vkGetSemaphoreFdKHR failed, res=%d\n", res);
+            semaphore_fd = -1;
+            goto err;
+        }
+        if (semaphore_fd < 0)
+        {
+            ERR("Invalid semaphore fd\n");
+            goto err;
+        }
+
+        pollfd.fd = semaphore_fd;
+        pollfd.events = POLLIN;
+
+        while ((ret = poll(&pollfd, 1, -1)) == -1 && errno == EINTR)
+            continue;
+
+        if (ret < 0)
+        {
+            ERR("Poll fd failed errno=%d\n", errno);
+            goto err;
+        }
+        if (pollfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+        {
+            ERR("Poll fd failed\n");
+            goto err;
+        }
+
+        close(semaphore_fd);
+    }
+
+    return 0;
+
+err:
+    ERR("Failed to wait for semaphores before presenting queue\n");
+    if (semaphore_fd >= 0)
+        close(semaphore_fd);
+    return -1;
+}
+
 static VkResult wayland_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *present_info)
 {
     VkResult res;
+    unsigned int i;
+    struct wine_vk_swapchain *wine_vk_swapchain;
+    int res_chain;
+    BOOL failed = FALSE;
 
     TRACE("%p, %p\n", queue, present_info);
 
@@ -1201,10 +1304,52 @@ static VkResult wayland_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR 
     lock_swapchain_wayland_surfaces(present_info, TRUE);
 
     if ((res = validate_present_info(present_info)) == VK_SUCCESS)
-        res = pvkQueuePresentKHR(queue, present_info);
+    {
+        wine_vk_swapchain = wine_vk_swapchain_from_handle(present_info->pSwapchains[0]);
+        if (!wine_vk_swapchain_is_remote(wine_vk_swapchain))
+        {
+            /* We are not dealing with cross-process swapchains, so we don't
+             * have to use our remote Vulkan implementation to present */
+            res = pvkQueuePresentKHR(queue, present_info);
+        }
+        else
+        {
+            /* We are dealing with cross-process swapchains, so use our remote
+             * Vulkan implementation to present */
+            if (present_info->swapchainCount == 0 || !present_info->pSwapchains)
+            {
+                ERR("Invalid number of swapchains to present: 0\n");
+                res = VK_ERROR_OUT_OF_HOST_MEMORY;
+                goto out;
+            }
+            for (i = 0; i < present_info->swapchainCount; i++)
+            {
+                wine_vk_swapchain = wine_vk_swapchain_from_handle(present_info->pSwapchains[i]);
 
+                /* Before presenting the 1st swapchain, wait for the semaphores */
+                if (i == 0 && queue_present_wait_semaphores(wine_vk_swapchain, present_info) < 0)
+                {
+                    res = VK_ERROR_OUT_OF_HOST_MEMORY;
+                    goto out;
+                }
+
+                res_chain = wayland_remote_vk_swapchain_present(wine_vk_swapchain->remote_vk_swapchain,
+                                                                present_info->pImageIndices[i]);
+                if (res_chain < 0)
+                    failed = TRUE;
+
+                if (present_info->pResults)
+                    present_info->pResults[i] = failed ? VK_ERROR_OUT_OF_HOST_MEMORY : VK_SUCCESS;
+            }
+
+            /* If presenting any of the swapchains fails, this function fails */
+            if (failed)
+                res = VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
+    }
+
+out:
     lock_swapchain_wayland_surfaces(present_info, FALSE);
-
     return res;
 }
 

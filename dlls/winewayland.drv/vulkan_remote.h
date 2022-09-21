@@ -1,0 +1,37 @@
+/* WAYLANDDRV Vulkan remote implementation
+ *
+ * Copyright 2022 Leandro Ribeiro
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+#ifndef __WINE_WAYLANDDRV_VULKAN_REMOTE_H
+#define __WINE_WAYLANDDRV_VULKAN_REMOTE_H
+
+#include "config.h"
+
+#include "waylanddrv.h"
+
+#define VK_NO_PROTOTYPES
+#define WINE_VK_HOST
+
+#include "wine/vulkan.h"
+
+struct wayland_remote_vk_swapchain;
+
+struct wayland_remote_vk_swapchain *wayland_remote_vk_swapchain_create(HWND hwnd) DECLSPEC_HIDDEN;
+void wayland_remote_vk_swapchain_destroy(struct wayland_remote_vk_swapchain *swapchain) DECLSPEC_HIDDEN;
+
+#endif /* __WINE_WAYLANDDRV_VULKAN_REMOTE_H */

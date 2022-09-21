@@ -35,6 +35,7 @@
 
 #include "wine/vulkan.h"
 #include "wine/vulkan_driver.h"
+#include "vulkan_remote.h"
 
 #include <dlfcn.h>
 #include <stdlib.h>
@@ -135,6 +136,8 @@ struct wine_vk_swapchain
     VkSwapchainKHR native_vk_swapchain;
     VkExtent2D extent;
     BOOL valid;
+    /* Only used for cross-process Vulkan rendering apps. */
+    struct wayland_remote_vk_swapchain *remote_vk_swapchain;
 };
 
 static inline void wine_vk_list_add(struct wl_list *list, struct wl_list *link)
@@ -191,6 +194,9 @@ static void wine_vk_swapchain_destroy(struct wine_vk_swapchain *wine_vk_swapchai
 
     if (wine_vk_swapchain->wayland_surface)
         wayland_surface_unref_glvk(wine_vk_swapchain->wayland_surface);
+
+    if (wine_vk_swapchain->remote_vk_swapchain)
+        wayland_remote_vk_swapchain_destroy(wine_vk_swapchain->remote_vk_swapchain);
 
     free(wine_vk_swapchain);
 }
@@ -537,6 +543,7 @@ static VkResult wayland_vkCreateSwapchainKHR(VkDevice device,
                                              VkSwapchainKHR *swapchain)
 {
     VkResult res;
+    struct wine_vk_device *wine_vk_device;
     struct wine_vk_surface *wine_vk_surface;
     struct wine_vk_swapchain *wine_vk_swapchain;
     VkSwapchainCreateInfoKHR info = *create_info;
@@ -551,6 +558,10 @@ static VkResult wayland_vkCreateSwapchainKHR(VkDevice device,
         info.imageExtent.width = 1;
     if (info.imageExtent.height == 0)
         info.imageExtent.height = 1;
+
+    wine_vk_device = wine_vk_device_from_handle(device);
+    if (!wine_vk_device)
+        return VK_ERROR_DEVICE_LOST;
 
     wine_vk_surface = wine_vk_surface_from_handle(info.surface);
     if (!wine_vk_surface || !__atomic_load_n(&wine_vk_surface->valid, __ATOMIC_SEQ_CST))
@@ -569,9 +580,33 @@ static VkResult wayland_vkCreateSwapchainKHR(VkDevice device,
     wine_vk_swapchain->hwnd = wine_vk_surface->hwnd;
     if (wine_vk_surface->wayland_surface)
     {
-        wayland_surface_create_or_ref_glvk(wine_vk_surface->wayland_surface);
+        if (!wayland_surface_create_or_ref_glvk(wine_vk_surface->wayland_surface))
+        {
+            ERR("Failed to create or ref vulkan surface owned by " \
+                "wine_vk_surface=%p\n", wine_vk_surface);
+            res = VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto err;
+        }
         wine_vk_swapchain->wayland_surface = wine_vk_surface->wayland_surface;
     }
+    else
+    {
+        if (!wine_vk_device->supports_remote_vulkan)
+        {
+            ERR("Failed to create remote Vulkan swapchain, required extensions " \
+                "not supported by VkDevice %p\n", wine_vk_device->dev);
+            res = VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto err;
+        }
+        wine_vk_swapchain->remote_vk_swapchain =
+            wayland_remote_vk_swapchain_create(wine_vk_swapchain->hwnd);
+        if (!wine_vk_swapchain->remote_vk_swapchain)
+        {
+            res = VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto err;
+        }
+    }
+
     wine_vk_swapchain->native_vk_swapchain = *swapchain;
     wine_vk_swapchain->extent = info.imageExtent;
     wine_vk_swapchain->valid = TRUE;

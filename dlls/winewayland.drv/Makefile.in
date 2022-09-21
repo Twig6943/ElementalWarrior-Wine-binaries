@@ -15,6 +15,7 @@ C_SRCS = \
 	registry.c \
 	unicode.c \
 	vulkan.c \
+	vulkan_remote.c \
 	wayland.c \
 	wayland_buffer_queue.c \
 	wayland_cursor.c \

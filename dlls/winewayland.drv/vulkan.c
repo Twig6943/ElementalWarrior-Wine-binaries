@@ -59,6 +59,7 @@ typedef struct VkWaylandSurfaceCreateInfoKHR
     struct wl_surface *surface;
 } VkWaylandSurfaceCreateInfoKHR;
 
+static VkResult (*pvkAcquireNextImageKHR)(VkDevice, VkSwapchainKHR, uint64_t, VkSemaphore, VkFence, uint32_t *);
 static VkResult (*pvkCreateDevice)(VkPhysicalDevice, const VkDeviceCreateInfo *, const VkAllocationCallbacks *, VkDevice *);
 static VkResult (*pvkCreateInstance)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *, VkInstance *);
 static VkResult (*pvkCreateSwapchainKHR)(VkDevice, const VkSwapchainCreateInfoKHR *, const VkAllocationCallbacks *, VkSwapchainKHR *);
@@ -1088,6 +1089,17 @@ static VkResult wayland_vkGetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR 
     return pvkGetSwapchainImagesKHR(device, swapchain, count, images);
 }
 
+static VkResult wayland_vkAcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain,
+                                              uint64_t timeout, VkSemaphore semaphore,
+                                              VkFence fence, uint32_t *image_index)
+{
+    TRACE("%p 0x%s 0x%s 0x%s 0x%s %p\n",
+          device, wine_dbgstr_longlong(swapchain), wine_dbgstr_longlong(timeout),
+          wine_dbgstr_longlong(semaphore), wine_dbgstr_longlong(fence), image_index);
+
+    return pvkAcquireNextImageKHR(device, swapchain, timeout, semaphore, fence, image_index);
+}
+
 static VkResult validate_present_info(const VkPresentInfoKHR *present_info)
 {
     uint32_t i;
@@ -1200,6 +1212,7 @@ static void wine_vk_init(void)
 
 #define LOAD_FUNCPTR(f) if (!(p##f = dlsym(vulkan_handle, #f))) goto fail
 #define LOAD_OPTIONAL_FUNCPTR(f) p##f = dlsym(vulkan_handle, #f)
+    LOAD_FUNCPTR(vkAcquireNextImageKHR);
     LOAD_FUNCPTR(vkCreateDevice);
     LOAD_FUNCPTR(vkCreateInstance);
     LOAD_FUNCPTR(vkCreateSwapchainKHR);
@@ -1235,6 +1248,7 @@ fail:
 
 static const struct vulkan_funcs vulkan_funcs =
 {
+    .p_vkAcquireNextImageKHR = wayland_vkAcquireNextImageKHR,
     .p_vkCreateDevice = wayland_vkCreateDevice,
     .p_vkCreateInstance = wayland_vkCreateInstance,
     .p_vkCreateSwapchainKHR = wayland_vkCreateSwapchainKHR,

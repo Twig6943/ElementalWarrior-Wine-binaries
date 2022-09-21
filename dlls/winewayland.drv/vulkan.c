@@ -120,6 +120,7 @@ struct wine_vk_surface
 {
     struct wl_list link;
     HWND hwnd;
+    VkInstance instance;
     struct wayland_surface *wayland_surface;
     /* Used when we are rendering cross-process and we don't have the real
      * wayland surface available. */
@@ -132,6 +133,7 @@ struct wine_vk_swapchain
 {
     struct wl_list link;
     HWND hwnd;
+    struct wine_vk_device *wine_vk_device;
     struct wayland_surface *wayland_surface;
     VkSwapchainKHR native_vk_swapchain;
     VkExtent2D extent;
@@ -196,7 +198,8 @@ static void wine_vk_swapchain_destroy(struct wine_vk_swapchain *wine_vk_swapchai
         wayland_surface_unref_glvk(wine_vk_swapchain->wayland_surface);
 
     if (wine_vk_swapchain->remote_vk_swapchain)
-        wayland_remote_vk_swapchain_destroy(wine_vk_swapchain->remote_vk_swapchain);
+        wayland_remote_vk_swapchain_destroy(wine_vk_swapchain->remote_vk_swapchain,
+                                            wine_vk_swapchain->wine_vk_device->dev);
 
     free(wine_vk_swapchain);
 }
@@ -215,6 +218,11 @@ static struct wine_vk_swapchain *wine_vk_swapchain_from_handle(VkSurfaceKHR hand
 out:
     wayland_mutex_unlock(&wine_vk_object_mutex);
     return swap;
+}
+
+static BOOL wine_vk_swapchain_is_remote(struct wine_vk_swapchain *wine_vk_swapchain)
+{
+    return wine_vk_swapchain && wine_vk_swapchain->remote_vk_swapchain;
 }
 
 static BOOL vk_extension_props_contain_all(uint32_t count_props,
@@ -599,7 +607,12 @@ static VkResult wayland_vkCreateSwapchainKHR(VkDevice device,
             goto err;
         }
         wine_vk_swapchain->remote_vk_swapchain =
-            wayland_remote_vk_swapchain_create(wine_vk_swapchain->hwnd);
+            wayland_remote_vk_swapchain_create(wine_vk_swapchain->hwnd,
+                                               wine_vk_surface->instance,
+                                               wine_vk_device->phys_dev,
+                                               wine_vk_device->dev,
+                                               &vulkan_funcs,
+                                               &info);
         if (!wine_vk_swapchain->remote_vk_swapchain)
         {
             res = VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -607,6 +620,7 @@ static VkResult wayland_vkCreateSwapchainKHR(VkDevice device,
         }
     }
 
+    wine_vk_swapchain->wine_vk_device = wine_vk_device;
     wine_vk_swapchain->native_vk_swapchain = *swapchain;
     wine_vk_swapchain->extent = info.imageExtent;
     wine_vk_swapchain->valid = TRUE;
@@ -700,6 +714,7 @@ static VkResult wayland_vkCreateWin32SurfaceKHR(VkInstance instance,
     }
 
     wine_vk_surface->hwnd = create_info->hwnd;
+    wine_vk_surface->instance = instance;
     wine_vk_surface->native_vk_surface = *vk_surface;
     wine_vk_surface->valid = TRUE;
 
@@ -1062,7 +1077,13 @@ static VkBool32 wayland_vkGetPhysicalDeviceWin32PresentationSupportKHR(VkPhysica
 static VkResult wayland_vkGetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain,
                                                 uint32_t *count, VkImage *images)
 {
+    struct wine_vk_swapchain *wine_vk_swapchain = wine_vk_swapchain_from_handle(swapchain);
+
     TRACE("%p, 0x%s %p %p\n", device, wine_dbgstr_longlong(swapchain), count, images);
+
+    if (wine_vk_swapchain_is_remote(wine_vk_swapchain))
+        return wayland_remote_vk_swapchain_get_images(wine_vk_swapchain->remote_vk_swapchain,
+                                                      count, images);
 
     return pvkGetSwapchainImagesKHR(device, swapchain, count, images);
 }

@@ -30,8 +30,16 @@
 #include "wine/vulkan.h"
 
 struct wayland_remote_vk_swapchain;
+struct vulkan_funcs;
 
-struct wayland_remote_vk_swapchain *wayland_remote_vk_swapchain_create(HWND hwnd) DECLSPEC_HIDDEN;
-void wayland_remote_vk_swapchain_destroy(struct wayland_remote_vk_swapchain *swapchain) DECLSPEC_HIDDEN;
+struct wayland_remote_vk_swapchain *wayland_remote_vk_swapchain_create(HWND hwnd, VkInstance instance,
+                                                                       VkPhysicalDevice physical_device,
+                                                                       VkDevice device,
+                                                                       const struct vulkan_funcs *vulkan_funcs,
+                                                                       VkSwapchainCreateInfoKHR *create_info) DECLSPEC_HIDDEN;
+void wayland_remote_vk_swapchain_destroy(struct wayland_remote_vk_swapchain *swapchain,
+                                         VkDevice device) DECLSPEC_HIDDEN;
+VkResult wayland_remote_vk_swapchain_get_images(struct wayland_remote_vk_swapchain *swapchain,
+                                                uint32_t *count, VkImage *images) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_WAYLANDDRV_VULKAN_REMOTE_H */

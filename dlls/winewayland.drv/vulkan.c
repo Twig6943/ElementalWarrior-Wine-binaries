@@ -913,13 +913,25 @@ static void set_image_extent(VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR *cap
     struct wine_vk_surface *wine_vk_surface = wine_vk_surface_from_handle(surface);
     BOOL zero_extents = FALSE;
 
-    if (!wine_vk_surface || !wine_vk_surface->wayland_surface)
+    if (!wine_vk_surface)
         return;
 
-    wayland_mutex_lock(&wine_vk_surface->wayland_surface->mutex);
-    if (!wine_vk_surface->wayland_surface->drawing_allowed)
-        zero_extents = TRUE;
-    wayland_mutex_unlock(&wine_vk_surface->wayland_surface->mutex);
+    if (wine_vk_surface_is_remote(wine_vk_surface))
+    {
+        /* For cross-process surfaces, we don't have the information of
+         * drawing_allowed. So we set zero_extents to FALSE. That is safe to do
+         * because the process that will call wl_surface_commit() won't commit
+         * anything when drawing_allowed == FALSE. */
+        zero_extents = FALSE;
+    }
+    else
+    {
+        assert(wine_vk_surface->wayland_surface);
+        wayland_mutex_lock(&wine_vk_surface->wayland_surface->mutex);
+        if (!wine_vk_surface->wayland_surface->drawing_allowed)
+            zero_extents = TRUE;
+        wayland_mutex_unlock(&wine_vk_surface->wayland_surface->mutex);
+    }
 
     if (NtUserGetWindowLongW(wine_vk_surface->hwnd, GWL_STYLE) & WS_MINIMIZE)
         zero_extents = TRUE;
@@ -946,10 +958,10 @@ static void set_image_extent(VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR *cap
         caps->currentExtent.height = client.bottom;
     }
 
-    TRACE("vk_surface=%s hwnd=%p wayland_surface=%p extent=%dx%d\n",
+    TRACE("vk_surface=%s hwnd=%p wayland_surface=%p dummy_wl_surface=%p extent=%dx%d\n",
           wine_dbgstr_longlong(surface), wine_vk_surface->hwnd,
-          wine_vk_surface->wayland_surface, caps->currentExtent.width,
-          caps->currentExtent.height);
+          wine_vk_surface->wayland_surface, wine_vk_surface->dummy_wl_surface,
+          caps->currentExtent.width, caps->currentExtent.height);
 }
 
 static VkResult wayland_vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice phys_dev,

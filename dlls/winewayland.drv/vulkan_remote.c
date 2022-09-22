@@ -694,3 +694,52 @@ err:
     ERR("Failed to present remote Vulkan swapchain\n");
     return -1;
 }
+
+VkResult wayland_remote_vk_filter_supported_formats(uint32_t *count_filtered_formats,
+                                                    void *filtered_formats,
+                                                    uint32_t count_formats_to_filter,
+                                                    void *formats_to_filter,
+                                                    size_t format_size,
+                                                    size_t vk_surface_format_offset)
+{
+    VkFormat format;
+    VkResult res = VK_SUCCESS;
+    uint32_t count_intersect;
+    unsigned int i;
+
+    for (count_intersect = 0, i = 0; i < count_formats_to_filter; i++)
+    {
+        format = *(VkFormat *)((char *)formats_to_filter +
+                               (i * format_size) + vk_surface_format_offset);
+        if (vulkan_format_to_drm_format(format, FALSE) != DRM_FORMAT_INVALID)
+        {
+            if (filtered_formats)
+            {
+                if (count_intersect < *count_filtered_formats)
+                {
+                    /* There's room for a format on the array, so add it */
+                    memcpy((char *)filtered_formats + (count_intersect * format_size),
+                           (char *)formats_to_filter + (i * format_size),
+                           format_size);
+                }
+                else
+                {
+                    /* Array size is not enough to accommodate all the formats
+                     * we support, so we must return VK_INCOMPLETE */
+                    res = VK_INCOMPLETE;
+                    break;
+                }
+            }
+            count_intersect++;
+        }
+    }
+
+    /* We just set count_filtered_formats when the client want us to do that
+     * (i.e., filtered_formats == NULL) and when the client want us to fill
+     * filtered_formats but for some reason the size of the array is larger than
+     * the number of formats that we support. */
+    if (!filtered_formats || *count_filtered_formats > count_intersect)
+        *count_filtered_formats = count_intersect;
+
+    return res;
+}

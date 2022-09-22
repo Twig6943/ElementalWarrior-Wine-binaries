@@ -206,6 +206,11 @@ static BOOL wine_vk_surface_handle_is_valid(VkSurfaceKHR handle)
     return wine_vk_surface && __atomic_load_n(&wine_vk_surface->valid, __ATOMIC_SEQ_CST);
 }
 
+static BOOL wine_vk_surface_is_remote(struct wine_vk_surface *wine_vk_surface)
+{
+    return wine_vk_surface && wine_vk_surface->dummy_wl_surface;
+}
+
 static void wine_vk_swapchain_destroy(struct wine_vk_swapchain *wine_vk_swapchain)
 {
     wine_vk_list_remove(&wine_vk_swapchain->link);
@@ -1002,6 +1007,114 @@ static VkResult wayland_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevi
     return res;
 }
 
+static VkResult get_surface_formats2(VkPhysicalDevice phys_dev,
+                                     const VkPhysicalDeviceSurfaceInfo2KHR *surface_info,
+                                     uint32_t *count, VkSurfaceFormat2KHR *formats)
+{
+    struct wine_vk_surface *wine_vk_surface =
+        wine_vk_surface_from_handle(surface_info->surface);
+    uint32_t count_host_formats;
+    VkSurfaceFormat2KHR *host_formats = NULL;
+    VkResult res = VK_SUCCESS;
+
+    if (!wine_vk_surface_is_remote(wine_vk_surface))
+        return pvkGetPhysicalDeviceSurfaceFormats2KHR(phys_dev, surface_info,
+                                                      count, formats);
+
+    res = pvkGetPhysicalDeviceSurfaceFormats2KHR(phys_dev, surface_info,
+                                                 &count_host_formats, NULL);
+    if (res != VK_SUCCESS)
+    {
+        ERR("pvkGetPhysicalDeviceSurfaceFormats2KHR failed, res=%d\n", res);
+        goto out;
+    }
+
+    host_formats = calloc(count_host_formats, sizeof(*host_formats));
+    if (!host_formats)
+    {
+        ERR("Failed to allocate memory\n");
+        res = VK_ERROR_OUT_OF_HOST_MEMORY;
+        goto out;
+    }
+
+    res = pvkGetPhysicalDeviceSurfaceFormats2KHR(phys_dev, surface_info,
+                                                 &count_host_formats, host_formats);
+    if (res != VK_SUCCESS)
+    {
+        ERR("pvkGetPhysicalDeviceSurfaceFormats2KHR failed, res=%d\n", res);
+        goto out;
+    }
+
+    res = wayland_remote_vk_filter_supported_formats(count, formats,
+                                                     count_host_formats, host_formats,
+                                                     sizeof(VkSurfaceFormat2KHR),
+                                                     offsetof(VkSurfaceFormat2KHR,
+                                                              surfaceFormat));
+    if (*count == 0)
+    {
+        res = VK_ERROR_OUT_OF_HOST_MEMORY;
+        ERR("Failed to find formats supported by both host and remote Vulkan\n");
+    }
+
+out:
+    if (res != VK_SUCCESS && res != VK_INCOMPLETE)
+        ERR("Failed to get surface formats\n");
+    free(host_formats);
+    return res;
+}
+
+static VkResult get_surface_formats(VkPhysicalDevice phys_dev, VkSurfaceKHR surface,
+                                    uint32_t *count, VkSurfaceFormatKHR *formats)
+{
+    struct wine_vk_surface *wine_vk_surface = wine_vk_surface_from_handle(surface);
+    uint32_t count_host_formats;
+    VkSurfaceFormatKHR *host_formats = NULL;
+    VkResult res = VK_SUCCESS;
+
+    if (!wine_vk_surface_is_remote(wine_vk_surface))
+        return pvkGetPhysicalDeviceSurfaceFormatsKHR(phys_dev, surface,
+                                                     count, formats);
+
+    res = pvkGetPhysicalDeviceSurfaceFormatsKHR(phys_dev, surface,
+                                                &count_host_formats, NULL);
+    if (res != VK_SUCCESS)
+    {
+        ERR("pvkGetPhysicalDeviceSurfaceFormatsKHR failed, res=%d\n", res);
+        goto out;
+    }
+
+    host_formats = calloc(count_host_formats, sizeof(*host_formats));
+    if (!host_formats)
+    {
+        ERR("Failed to allocate memory\n");
+        res = VK_ERROR_OUT_OF_HOST_MEMORY;
+        goto out;
+    }
+
+    res = pvkGetPhysicalDeviceSurfaceFormatsKHR(phys_dev, surface,
+                                                &count_host_formats, host_formats);
+    if (res != VK_SUCCESS)
+    {
+        ERR("pvkGetPhysicalDeviceSurfaceFormatsKHR failed, res=%d\n", res);
+        goto out;
+    }
+
+    res = wayland_remote_vk_filter_supported_formats(count, formats,
+                                                     count_host_formats, host_formats,
+                                                     sizeof(VkSurfaceFormatKHR), 0);
+    if (*count == 0)
+    {
+        res = VK_ERROR_OUT_OF_HOST_MEMORY;
+        ERR("Failed to find formats supported by both host and remote Vulkan\n");
+    }
+
+out:
+    if (res != VK_SUCCESS && res != VK_INCOMPLETE)
+        ERR("Failed to get surface formats\n");
+    free(host_formats);
+    return res;
+}
+
 static VkResult wayland_vkGetPhysicalDeviceSurfaceFormats2KHR(VkPhysicalDevice phys_dev,
                                                               const VkPhysicalDeviceSurfaceInfo2KHR *surface_info,
                                                               uint32_t *count,
@@ -1016,10 +1129,7 @@ static VkResult wayland_vkGetPhysicalDeviceSurfaceFormats2KHR(VkPhysicalDevice p
         RETURN_VK_ERROR_SURFACE_LOST_KHR;
 
     if (pvkGetPhysicalDeviceSurfaceFormats2KHR)
-    {
-        return pvkGetPhysicalDeviceSurfaceFormats2KHR(phys_dev, surface_info,
-                                                      count, formats);
-    }
+        return get_surface_formats2(phys_dev, surface_info, count, formats);
 
     /* Until the loader version exporting this function is common, emulate it
      * using the older non-2 version. */
@@ -1030,15 +1140,11 @@ static VkResult wayland_vkGetPhysicalDeviceSurfaceFormats2KHR(VkPhysicalDevice p
     }
 
     if (!formats)
-    {
-        return pvkGetPhysicalDeviceSurfaceFormatsKHR(phys_dev, surface_info->surface,
-                                                     count, NULL);
-    }
+        return get_surface_formats(phys_dev, surface_info->surface, count, NULL);
 
     formats_host = calloc(*count, sizeof(*formats_host));
     if (!formats_host) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    result = pvkGetPhysicalDeviceSurfaceFormatsKHR(phys_dev, surface_info->surface,
-                                                   count, formats_host);
+    result = get_surface_formats(phys_dev, surface_info->surface, count, formats_host);
     if (result == VK_SUCCESS || result == VK_INCOMPLETE)
     {
         for (i = 0; i < *count; i++)
@@ -1059,7 +1165,7 @@ static VkResult wayland_vkGetPhysicalDeviceSurfaceFormatsKHR(VkPhysicalDevice ph
     if (!wine_vk_surface_handle_is_valid(surface))
         RETURN_VK_ERROR_SURFACE_LOST_KHR;
 
-    return pvkGetPhysicalDeviceSurfaceFormatsKHR(phys_dev, surface, count, formats);
+    return get_surface_formats(phys_dev, surface, count, formats);
 }
 
 static VkResult wayland_vkGetPhysicalDeviceSurfacePresentModesKHR(VkPhysicalDevice phys_dev,

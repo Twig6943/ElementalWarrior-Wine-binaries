@@ -62,6 +62,7 @@ static void(*pvkDestroyDevice)(VkDevice, const VkAllocationCallbacks *);
 static void (*pvkDestroyInstance)(VkInstance, const VkAllocationCallbacks *);
 static void (*pvkDestroySurfaceKHR)(VkInstance, VkSurfaceKHR, const VkAllocationCallbacks *);
 static void (*pvkDestroySwapchainKHR)(VkDevice, VkSwapchainKHR, const VkAllocationCallbacks *);
+static VkResult (*pvkEnumerateDeviceExtensionProperties)(VkPhysicalDevice, const char *, uint32_t *, VkExtensionProperties *);
 static VkResult (*pvkEnumerateInstanceExtensionProperties)(const char *, uint32_t *, VkExtensionProperties *);
 static VkResult (*pvkGetDeviceGroupSurfacePresentModesKHR)(VkDevice, VkSurfaceKHR, VkDeviceGroupPresentModeFlagsKHR *);
 static void * (*pvkGetDeviceProcAddr)(VkDevice, const char *);
@@ -90,11 +91,18 @@ static struct wl_list wine_vk_device_list = { &wine_vk_device_list, &wine_vk_dev
 
 static const struct vulkan_funcs vulkan_funcs;
 
+/* These device extensions are required to support Vulkan remote. Some of them
+ * might not be supported by the device, so we must check. */
+const static char *device_extensions_remote_vulkan[] =
+{
+};
+
 struct wine_vk_device
 {
     struct wl_list link;
     VkDevice dev;
     VkPhysicalDevice phys_dev;
+    BOOL supports_remote_vulkan;
 };
 
 struct wine_vk_surface
@@ -188,6 +196,32 @@ out:
     return swap;
 }
 
+static BOOL vk_extension_props_contain_all(uint32_t count_props,
+                                           VkExtensionProperties *props,
+                                           uint32_t count_required,
+                                           const char * const *required)
+{
+    BOOL supported;
+    unsigned int i, j;
+
+    for (i = 0; i < count_required; i++)
+    {
+        supported = FALSE;
+        for (j = 0; j < count_props; j++)
+        {
+            if (strcmp(props[j].extensionName, required[i]) == 0)
+            {
+                supported = TRUE;
+                break;
+            }
+        }
+        if (!supported)
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
 /* Helper function for converting between win32 and Wayland compatible VkInstanceCreateInfo.
  * Caller is responsible for allocation and cleanup of 'dst'.
  */
@@ -265,10 +299,12 @@ static VkResult wayland_vkCreateInstance(const VkInstanceCreateInfo *create_info
     return res;
 }
 
-static VkResult wine_vk_device_convert_create_info(const VkDeviceCreateInfo *src,
+static VkResult wine_vk_device_convert_create_info(struct wine_vk_device *wine_vk_device,
+                                                   const VkDeviceCreateInfo *src,
                                                    VkDeviceCreateInfo *dst)
 {
-    unsigned int i;
+    unsigned int i, j;
+    uint32_t enabled_extensions_count;
     const char **enabled_extensions = NULL;
 
     dst->sType = src->sType;
@@ -284,21 +320,37 @@ static VkResult wine_vk_device_convert_create_info(const VkDeviceCreateInfo *src
 
     if (src->enabledExtensionCount > 0)
     {
-        enabled_extensions = calloc(src->enabledExtensionCount, sizeof(*src->ppEnabledExtensionNames));
+        enabled_extensions_count = src->enabledExtensionCount;
+        if (wine_vk_device->supports_remote_vulkan)
+            enabled_extensions_count += ARRAY_SIZE(device_extensions_remote_vulkan);
+
+        enabled_extensions = calloc(enabled_extensions_count, sizeof(*src->ppEnabledExtensionNames));
         if (!enabled_extensions)
         {
             ERR("Failed to allocate memory for enabled extensions\n");
-            return VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto err;
         }
 
         for (i = 0; i < src->enabledExtensionCount; i++)
             enabled_extensions[i] = src->ppEnabledExtensionNames[i];
 
+        if (wine_vk_device->supports_remote_vulkan)
+        {
+            /* Add the extensions required to support remote Vulkan */
+            for (j = 0; j < ARRAY_SIZE(device_extensions_remote_vulkan); j++, i++)
+                enabled_extensions[i] = device_extensions_remote_vulkan[j];
+        }
+
         dst->ppEnabledExtensionNames = enabled_extensions;
-        dst->enabledExtensionCount = src->enabledExtensionCount;
+        dst->enabledExtensionCount = enabled_extensions_count;
     }
 
     return VK_SUCCESS;
+
+err:
+    ERR("Failed to convert device create info\n");
+    free(enabled_extensions);
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
 }
 
 static struct wine_vk_device *wine_vk_device_from_handle(VkDevice handle)
@@ -331,6 +383,8 @@ static VkResult wayland_vkCreateDevice(VkPhysicalDevice physical_device,
     VkDeviceCreateInfo create_info_host = {0};
     VkResult res;
     struct wine_vk_device *wine_vk_device;
+    VkExtensionProperties *props = NULL;
+    uint32_t count_props;
 
     TRACE("%p %p %p %p\n", physical_device, create_info, allocator, device);
 
@@ -345,7 +399,35 @@ static VkResult wayland_vkCreateDevice(VkPhysicalDevice physical_device,
         goto err;
     }
 
-    res = wine_vk_device_convert_create_info(create_info, &create_info_host);
+    res = pvkEnumerateDeviceExtensionProperties(physical_device, NULL, &count_props, NULL);
+    if (res != VK_SUCCESS)
+    {
+        ERR("pvkEnumerateDeviceExtensionProperties failed, res=%d\n", res);
+        goto err;
+    }
+    props = calloc(count_props, sizeof(*props));
+    if (!props)
+    {
+        ERR("Failed to allocate memory\n");
+        res = VK_ERROR_OUT_OF_HOST_MEMORY;
+        goto err;
+    }
+    res = pvkEnumerateDeviceExtensionProperties(physical_device, NULL, &count_props, props);
+    if (res != VK_SUCCESS)
+    {
+        ERR("pvkEnumerateDeviceExtensionProperties failed, res=%d\n", res);
+        goto err;
+    }
+
+    wine_vk_device->supports_remote_vulkan =
+        vk_extension_props_contain_all(count_props, props,
+                                       ARRAY_SIZE(device_extensions_remote_vulkan),
+                                       device_extensions_remote_vulkan);
+
+    free(props);
+    props = NULL;
+
+    res = wine_vk_device_convert_create_info(wine_vk_device, create_info, &create_info_host);
     if (res != VK_SUCCESS)
         goto err;
 
@@ -971,6 +1053,7 @@ static void wine_vk_init(void)
     LOAD_FUNCPTR(vkDestroyInstance);
     LOAD_FUNCPTR(vkDestroySurfaceKHR);
     LOAD_FUNCPTR(vkDestroySwapchainKHR);
+    LOAD_FUNCPTR(vkEnumerateDeviceExtensionProperties);
     LOAD_FUNCPTR(vkEnumerateInstanceExtensionProperties);
     LOAD_OPTIONAL_FUNCPTR(vkGetDeviceGroupSurfacePresentModesKHR);
     LOAD_FUNCPTR(vkGetDeviceProcAddr);

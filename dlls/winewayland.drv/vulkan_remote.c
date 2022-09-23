@@ -72,6 +72,8 @@ struct wayland_remote_vk_swapchain
     struct wayland_remote_surface_proxy *remote_surface_proxy;
     uint32_t count_images;
     struct wayland_remote_vk_image *images;
+    enum wayland_remote_buffer_commit buffer_commit;
+    HANDLE remote_throttle_event;
 };
 
 struct drm_vk_format
@@ -393,6 +395,10 @@ void wayland_remote_vk_swapchain_destroy(struct wayland_remote_vk_swapchain *swa
         }
         free(swapchain->images);
     }
+
+    if (swapchain->remote_throttle_event)
+        NtClose(swapchain->remote_throttle_event);
+
     free(swapchain);
 }
 
@@ -460,6 +466,12 @@ struct wayland_remote_vk_swapchain *wayland_remote_vk_swapchain_create(HWND hwnd
     if (res < 0)
         goto err;
 
+    swapchain->buffer_commit =
+        (create_info->presentMode == VK_PRESENT_MODE_FIFO_KHR) ?
+            WAYLAND_REMOTE_BUFFER_COMMIT_THROTTLED :
+            WAYLAND_REMOTE_BUFFER_COMMIT_NORMAL;
+
+    swapchain->remote_throttle_event = 0;
 
     return swapchain;
 
@@ -669,6 +681,63 @@ err:
     return VK_ERROR_OUT_OF_HOST_MEMORY;
 }
 
+static DWORD wayland_remote_vk_swapchain_wait_throttle(struct wayland_remote_vk_swapchain *swapchain,
+                                                       int timeout_ms)
+{
+    UINT ret;
+    LARGE_INTEGER timeout;
+
+    TRACE("remote_throttle_event=%p timeout_ms=%d\n",
+          swapchain->remote_throttle_event, timeout_ms);
+
+    if (!wayland_remote_surface_proxy_dispatch_events(swapchain->remote_surface_proxy))
+    {
+        ERR("Failed to dispatch remote events\n");
+        return WAIT_FAILED;
+    }
+
+    ret = NtWaitForSingleObject(swapchain->remote_throttle_event, FALSE,
+                                get_nt_timeout(&timeout, timeout_ms));
+    if (ret == WAIT_OBJECT_0)
+    {
+        NtClose(swapchain->remote_throttle_event);
+        swapchain->remote_throttle_event = 0;
+    }
+
+    TRACE("=> ret=%d\n", ret);
+    return ret;
+}
+
+static void wayland_remote_vk_swapchain_throttle(struct wayland_remote_vk_swapchain *swapchain)
+{
+    static const UINT timeout = 100;
+    UINT start, elapsed;
+
+    start = NtGetTickCount();
+    elapsed = 0;
+
+    TRACE("throttle_event=%p\n", swapchain->remote_throttle_event);
+
+    /* The compositor may at any time decide to not display the surface on
+     * screen and thus not send any frame events. Until we have a better way to
+     * deal with this, wait for a maximum of timeout for the frame event to
+     * arrive, in order to avoid blocking the GL thread indefinitely. */
+    while (elapsed < timeout && swapchain->remote_throttle_event &&
+           wayland_remote_vk_swapchain_wait_throttle(swapchain, 10) != WAIT_FAILED)
+    {
+        elapsed = get_tick_count_since(start);
+    }
+
+    TRACE("throttle_event=%p => elapsed=%d\n",
+          swapchain->remote_throttle_event, elapsed);
+
+    if (swapchain->remote_throttle_event)
+    {
+        NtClose(swapchain->remote_throttle_event);
+        swapchain->remote_throttle_event = 0;
+    }
+}
+
 int wayland_remote_vk_swapchain_present(struct wayland_remote_vk_swapchain *swapchain,
                                         uint32_t image_index)
 {
@@ -677,12 +746,15 @@ int wayland_remote_vk_swapchain_present(struct wayland_remote_vk_swapchain *swap
     image = &swapchain->images[image_index];
     image->busy = TRUE;
 
+    if (swapchain->remote_throttle_event)
+        wayland_remote_vk_swapchain_throttle(swapchain);
+
     if (!wayland_remote_surface_proxy_commit(swapchain->remote_surface_proxy,
                                              &image->native_buffer,
                                              WAYLAND_REMOTE_BUFFER_TYPE_DMABUF,
-                                             WAYLAND_REMOTE_BUFFER_COMMIT_NORMAL,
+                                             swapchain->buffer_commit,
                                              &image->remote_buffer_released_event,
-                                             NULL))
+                                             &swapchain->remote_throttle_event))
     {
         wayland_remote_vk_image_release(image);
         goto err;

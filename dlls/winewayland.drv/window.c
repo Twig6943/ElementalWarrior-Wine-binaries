@@ -48,3 +48,24 @@ BOOL WAYLAND_CreateWindow(HWND hwnd)
 
     return TRUE;
 }
+
+/**********************************************************************
+ *           WAYLAND_DesktopWindowProc
+ */
+LRESULT WAYLAND_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg)
+    {
+    case WM_DISPLAYCHANGE:
+        {
+            RECT virtual_rect = NtUserGetVirtualScreenRect();
+            NtUserSetWindowPos(hwnd, 0, virtual_rect.left, virtual_rect.top,
+                               virtual_rect.right - virtual_rect.left,
+                               virtual_rect.bottom - virtual_rect.top,
+                               SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE);
+        }
+        break;
+    }
+
+    return NtUserMessageCall(hwnd, msg, wp, lp, 0, NtUserDefWindowProc, FALSE);
+}

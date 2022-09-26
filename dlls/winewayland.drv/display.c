@@ -43,9 +43,25 @@ static void wayland_refresh_display_devices(void)
     NtUserGetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &num_path, &num_mode);
 }
 
+static void wayland_resize_desktop_window(void)
+{
+    BOOL wayland_initialized = wayland_process_acquire()->initialized;
+    wayland_process_release();
+
+    /* During process wayland initialization we will get our initial output
+     * information and init the display devices. There is no need to resize the
+     * desktop in this case, since this is the initial display state.
+     * Additionally, initialization may occur in a context that has acquired
+     * the internal Wine user32 lock, and sending messages would lead to an
+     * internal user32 lock error. */
+    if (wayland_initialized)
+        send_message(NtUserGetDesktopWindow(), WM_DISPLAYCHANGE, 0, 0);
+}
+
 void wayland_init_display_devices()
 {
     wayland_refresh_display_devices();
+    wayland_resize_desktop_window();
 }
 
 static void wayland_add_device_gpu(const struct gdi_device_manager *device_manager,

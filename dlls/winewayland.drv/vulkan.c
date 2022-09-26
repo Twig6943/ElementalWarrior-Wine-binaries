@@ -50,10 +50,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
 #define VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR 1000006000
 
-/* This is temporary until we fully support remote (cross-process) Vulkan
- * rendering, as we are progressively adding commits that add the support. */
-static const BOOL remote_rendering_supported = FALSE;
-
 typedef struct VkWaylandSurfaceCreateInfoKHR
 {
     VkStructureType sType;
@@ -697,7 +693,7 @@ static VkResult wayland_vkCreateWin32SurfaceKHR(VkInstance instance,
         }
         wine_vk_surface->wayland_surface = wayland_surface;
     }
-    else if (remote_rendering_supported)
+    else
     {
         struct wayland *wayland;
         if (!vulkan_instance_supports(ARRAY_SIZE(instance_extensions_remote_vulkan),
@@ -717,12 +713,6 @@ static VkResult wayland_vkCreateWin32SurfaceKHR(VkInstance instance,
             res = VK_ERROR_OUT_OF_HOST_MEMORY;
             goto err;
         }
-    }
-    else
-    {
-        ERR("Failed to create surface, cross-process Vulkan rendering not supported yet\n");
-        res = VK_ERROR_OUT_OF_HOST_MEMORY;
-        goto err;
     }
 
     create_info_host.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;

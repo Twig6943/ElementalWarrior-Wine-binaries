@@ -700,6 +700,9 @@ void wayland_surface_destroy(struct wayland_surface *surface)
         free(ref);
     }
 
+    if (surface->surface_feedback)
+        wayland_dmabuf_surface_feedback_destroy(surface->surface_feedback);
+
     if (surface->wp_viewport)
     {
         wp_viewport_destroy(surface->wp_viewport);

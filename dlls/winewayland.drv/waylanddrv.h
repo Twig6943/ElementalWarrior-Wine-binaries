@@ -165,6 +165,15 @@ struct wayland_dmabuf_feedback
     struct wl_array tranches;
 };
 
+struct wayland_dmabuf_surface_feedback
+{
+    struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1;
+    struct wayland_dmabuf_feedback *feedback;
+    struct wayland_dmabuf_feedback *pending_feedback;
+    struct wayland_mutex mutex;
+    BOOL surface_needs_update;
+};
+
 struct wayland_dmabuf
 {
     struct zwp_linux_dmabuf_v1 *zwp_linux_dmabuf_v1;
@@ -265,6 +274,7 @@ struct wayland_surface
     struct wp_viewport *wp_viewport;
     struct wayland_surface *parent;
     struct wayland_surface *glvk;
+    struct wayland_dmabuf_surface_feedback *surface_feedback;
     /* The offset of this surface relative to its owning win32 window */
     int offset_x, offset_y;
     HWND hwnd;
@@ -492,6 +502,11 @@ struct wayland_dmabuf_buffer *wayland_dmabuf_buffer_create_from_native(struct wa
                                                                        struct wayland_native_buffer *native) DECLSPEC_HIDDEN;
 void wayland_dmabuf_buffer_destroy(struct wayland_dmabuf_buffer *dmabuf_buffer) DECLSPEC_HIDDEN;
 struct wl_buffer *wayland_dmabuf_buffer_steal_wl_buffer_and_destroy(struct wayland_dmabuf_buffer *dmabuf_buffer) DECLSPEC_HIDDEN;
+struct wayland_dmabuf_surface_feedback *wayland_dmabuf_surface_feedback_create(struct wayland_dmabuf *dmabuf,
+                                                                               struct wl_surface *wl_surface) DECLSPEC_HIDDEN;
+void wayland_dmabuf_surface_feedback_destroy(struct wayland_dmabuf_surface_feedback *surface_feedback) DECLSPEC_HIDDEN;
+void wayland_dmabuf_surface_feedback_lock(struct wayland_dmabuf_surface_feedback *surface_feedback) DECLSPEC_HIDDEN;
+void wayland_dmabuf_surface_feedback_unlock(struct wayland_dmabuf_surface_feedback *surface_feedback) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Wayland buffer queue

@@ -299,6 +299,106 @@ static struct wayland_dmabuf_feedback *dmabuf_feedback_create(void)
     return feedback;
 }
 
+/**********************************************************************
+ *          per-surface feedback handling
+ */
+
+static void surface_dmabuf_feedback_main_device(void *data,
+                                                struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1,
+                                                struct wl_array *device)
+{
+    struct wayland_dmabuf_surface_feedback *surface_feedback = data;
+
+    dmabuf_feedback_main_device(surface_feedback->pending_feedback, zwp_linux_dmabuf_feedback_v1, device);
+}
+
+static void surface_dmabuf_feedback_format_table(void *data,
+                                                 struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1,
+                                                 int32_t fd, uint32_t size)
+{
+    struct wayland_dmabuf_surface_feedback *surface_feedback = data;
+
+    dmabuf_feedback_format_table(surface_feedback->pending_feedback, zwp_linux_dmabuf_feedback_v1, fd, size);
+}
+
+static void surface_dmabuf_feedback_tranche_target_device(void *data,
+                                                          struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1,
+                                                          struct wl_array *device)
+{
+    struct wayland_dmabuf_surface_feedback *surface_feedback = data;
+
+    dmabuf_feedback_tranche_target_device(surface_feedback->pending_feedback, zwp_linux_dmabuf_feedback_v1, device);
+}
+
+static void surface_dmabuf_feedback_tranche_formats(void *data,
+                                                    struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1,
+                                                    struct wl_array *indices)
+{
+    struct wayland_dmabuf_surface_feedback *surface_feedback = data;
+
+    if (!surface_feedback->pending_feedback->format_table_entries &&
+        (!(surface_feedback->pending_feedback->format_table_entries = surface_feedback->feedback->format_table_entries)))
+    {
+        WARN("Could not add formats/modifiers to tranche due to missing format table\n");
+        return;
+    }
+    dmabuf_feedback_tranche_formats(surface_feedback->pending_feedback, zwp_linux_dmabuf_feedback_v1, indices);
+}
+
+static void surface_dmabuf_feedback_tranche_flags(void *data,
+                                                  struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1,
+                                                  uint32_t flags)
+{
+    struct wayland_dmabuf_surface_feedback *surface_feedback = data;
+
+    surface_feedback->pending_feedback->pending_tranche.flags = flags;
+}
+
+static void surface_dmabuf_feedback_tranche_done(void *data,
+                                                 struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1)
+{
+    struct wayland_dmabuf_surface_feedback *surface_feedback = data;
+
+    dmabuf_feedback_tranche_done(surface_feedback->pending_feedback, zwp_linux_dmabuf_feedback_v1);
+}
+
+static void surface_dmabuf_feedback_done(void *data,
+                                         struct zwp_linux_dmabuf_feedback_v1 *zwp_linux_dmabuf_feedback_v1)
+{
+    struct wayland_dmabuf_surface_feedback *surface_feedback = data;
+
+    if (!surface_feedback->pending_feedback->format_table_entries)
+    {
+        WARN("Invalid format table: Ignoring feedback events.\n");
+        dmabuf_feedback_destroy(surface_feedback->pending_feedback);
+        goto out;
+    }
+
+    wayland_dmabuf_surface_feedback_lock(surface_feedback);
+
+    if (surface_feedback->feedback)
+        dmabuf_feedback_destroy(surface_feedback->feedback);
+
+    surface_feedback->feedback = surface_feedback->pending_feedback;
+    surface_feedback->surface_needs_update = TRUE;
+
+    wayland_dmabuf_surface_feedback_unlock(surface_feedback);
+
+out:
+    surface_feedback->pending_feedback = dmabuf_feedback_create();
+}
+
+static const struct zwp_linux_dmabuf_feedback_v1_listener surface_dmabuf_feedback_listener =
+{
+    .main_device = surface_dmabuf_feedback_main_device,
+    .format_table = surface_dmabuf_feedback_format_table,
+    .tranche_target_device = surface_dmabuf_feedback_tranche_target_device,
+    .tranche_formats = surface_dmabuf_feedback_tranche_formats,
+    .tranche_flags = surface_dmabuf_feedback_tranche_flags,
+    .tranche_done = surface_dmabuf_feedback_tranche_done,
+    .done = surface_dmabuf_feedback_done,
+};
+
 /***********************************************************************
  *           wayland_dmabuf_init
  */
@@ -343,6 +443,64 @@ void wayland_dmabuf_deinit(struct wayland_dmabuf *dmabuf)
 
     if (dmabuf->zwp_linux_dmabuf_v1)
         zwp_linux_dmabuf_v1_destroy(dmabuf->zwp_linux_dmabuf_v1);
+}
+
+/***********************************************************************
+ *           wayland_dmabuf_surface_feedback_create
+ */
+struct wayland_dmabuf_surface_feedback *wayland_dmabuf_surface_feedback_create(struct wayland_dmabuf *dmabuf,
+                                                                               struct wl_surface *wl_surface)
+{
+    struct wayland_dmabuf_surface_feedback *surface_feedback = NULL;
+
+    if (!(surface_feedback = calloc(1, sizeof(*surface_feedback))) ||
+        !(surface_feedback->pending_feedback = dmabuf_feedback_create()))
+    {
+        WARN("Failed to create surface feedback: Memory allocation error.");
+        free(surface_feedback);
+        return NULL;
+    }
+
+    wayland_mutex_init(&surface_feedback->mutex, PTHREAD_MUTEX_RECURSIVE,
+                       __FILE__ ": wayland_dmabuf_surface_feedback");
+
+    surface_feedback->zwp_linux_dmabuf_feedback_v1 =
+        zwp_linux_dmabuf_v1_get_surface_feedback(dmabuf->zwp_linux_dmabuf_v1, wl_surface);
+    zwp_linux_dmabuf_feedback_v1_add_listener(surface_feedback->zwp_linux_dmabuf_feedback_v1,
+                                              &surface_dmabuf_feedback_listener,
+                                              surface_feedback);
+
+    return surface_feedback;
+}
+
+/***********************************************************************
+ *           wayland_dmabuf_surface_feedback_destroy
+ */
+void wayland_dmabuf_surface_feedback_destroy(struct wayland_dmabuf_surface_feedback *surface_feedback)
+{
+    if (surface_feedback->feedback)
+        dmabuf_feedback_destroy(surface_feedback->feedback);
+
+    dmabuf_feedback_destroy(surface_feedback->pending_feedback);
+    zwp_linux_dmabuf_feedback_v1_destroy(surface_feedback->zwp_linux_dmabuf_feedback_v1);
+    wayland_mutex_destroy(&surface_feedback->mutex);
+    free(surface_feedback);
+}
+
+/***********************************************************************
+ *           wayland_dmabuf_surface_feedback_lock
+ */
+void wayland_dmabuf_surface_feedback_lock(struct wayland_dmabuf_surface_feedback *surface_feedback)
+{
+    if (surface_feedback) wayland_mutex_lock(&surface_feedback->mutex);
+}
+
+/***********************************************************************
+ *           wayland_dmabuf_surface_feedback_unlock
+ */
+void wayland_dmabuf_surface_feedback_unlock(struct wayland_dmabuf_surface_feedback *surface_feedback)
+{
+    wayland_mutex_unlock(&surface_feedback->mutex);
 }
 
 /**********************************************************************

@@ -836,6 +836,10 @@ BOOL wayland_surface_create_or_ref_glvk(struct wayland_surface *surface)
 
     wayland_surface_reconfigure_apply(surface);
 
+    if (wayland_dmabuf_has_feedback_support(&surface->wayland->dmabuf))
+        glvk->surface_feedback = wayland_dmabuf_surface_feedback_create(&surface->wayland->dmabuf,
+                                                                        glvk->wl_surface);
+
     return TRUE;
 
 err:

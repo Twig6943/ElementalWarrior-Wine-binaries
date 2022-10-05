@@ -512,8 +512,8 @@ void wayland_dmabuf_deinit(struct wayland_dmabuf *dmabuf)
 /***********************************************************************
  *           wayland_dmabuf_feedback_get_format_info
  */
-static BOOL wayland_dmabuf_feedback_get_format_info(struct wayland_dmabuf_feedback *feedback, uint32_t drm_format,
-                                                    dev_t render_dev, struct wayland_dmabuf_format_info *format_info)
+BOOL wayland_dmabuf_feedback_get_format_info(struct wayland_dmabuf_feedback *feedback, uint32_t drm_format,
+                                             dev_t render_dev, struct wayland_dmabuf_format_info *format_info)
 {
     struct wayland_dmabuf_feedback_tranche *tranche;
     struct wayland_dmabuf_format *dmabuf_format =
@@ -545,6 +545,14 @@ BOOL wayland_dmabuf_get_default_format_info(struct wayland_dmabuf *dmabuf, uint3
     format_info->count_modifiers = dmabuf_format_get_modifiers(dmabuf_format, &format_info->modifiers);
 
     return TRUE;
+}
+
+/***********************************************************************
+ *           wayland_dmabuf_has_feedback_support
+ */
+BOOL wayland_dmabuf_has_feedback_support(struct wayland_dmabuf *dmabuf)
+{
+    return dmabuf_has_feedback_support(dmabuf);
 }
 
 /***********************************************************************

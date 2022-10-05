@@ -175,12 +175,13 @@ static void wayland_gl_drawable_release(struct wayland_gl_drawable *gl)
     if (gl) wayland_mutex_unlock(&gl_object_mutex);
 }
 
-static struct gbm_surface *wayland_gl_create_gbm_surface(int width, int height,
+static struct gbm_surface *wayland_gl_create_gbm_surface(struct wayland_surface *glvk,
+                                                         int width, int height,
                                                          uint32_t drm_format)
 {
     struct wayland_dmabuf_format_info format_info;
     dev_t render_dev;
-    struct wayland_dmabuf *dmabuf;
+    struct wayland_dmabuf_surface_feedback *surface_feedback = glvk ? glvk->surface_feedback : NULL;
     struct gbm_surface *gbm_surface = NULL;
 
     if (!(render_dev = wayland_gbm_get_render_dev()))
@@ -189,17 +190,49 @@ static struct gbm_surface *wayland_gl_create_gbm_surface(int width, int height,
         goto out;
     }
 
-    dmabuf = &wayland_process_acquire()->dmabuf;
-
-    if (wayland_dmabuf_get_default_format_info(dmabuf, drm_format, render_dev, &format_info))
+    if (surface_feedback)
     {
-        gbm_surface = wayland_gbm_create_surface(drm_format, width, height,
-                                                 format_info.count_modifiers,
-                                                 format_info.modifiers,
-                                                 format_info.scanoutable);
+        wayland_dmabuf_surface_feedback_lock(glvk->surface_feedback);
+        if (surface_feedback->feedback)
+        {
+            if (wayland_dmabuf_feedback_get_format_info(surface_feedback->feedback, drm_format,
+                                                        render_dev, &format_info))
+            {
+                TRACE("Using per-surface feedback format/modifier information\n");
+                gbm_surface = wayland_gbm_create_surface(drm_format, width, height,
+                                                         format_info.count_modifiers,
+                                                         format_info.modifiers,
+                                                         format_info.scanoutable);
+            }
+        }
+        else
+        {
+            /*
+             * Compositor supports feedback but we haven't processed surface
+             * feedback events yet, so set surface_feedback to NULL to enter
+             * the default format info code path below.
+             */
+            surface_feedback = NULL;
+        }
+
+        wayland_dmabuf_surface_feedback_unlock(glvk->surface_feedback);
     }
 
-    wayland_process_release();
+    if (!surface_feedback)
+    {
+        struct wayland_dmabuf *dmabuf = &wayland_process_acquire()->dmabuf;
+
+        if (wayland_dmabuf_get_default_format_info(dmabuf, drm_format, render_dev, &format_info))
+        {
+            TRACE("Using default format/modifier information\n");
+            gbm_surface = wayland_gbm_create_surface(drm_format, width, height,
+                                                     format_info.count_modifiers,
+                                                     format_info.modifiers,
+                                                     format_info.scanoutable);
+        }
+
+        wayland_process_release();
+    }
 
 out:
     return gbm_surface;
@@ -218,8 +251,10 @@ static void wayland_gl_drawable_update(struct wayland_gl_drawable *gl)
     gl->width = client_rect.right;
     gl->height = client_rect.bottom;
 
-    gl->gbm_surface = wayland_gl_create_gbm_surface(gl->width, gl->height,
-                                                    pixel_formats[gl->format - 1].native_visual_id);
+    gl->gbm_surface =
+        wayland_gl_create_gbm_surface(gl->wayland_surface ? gl->wayland_surface->glvk : NULL,
+                                      gl->width, gl->height,
+                                      pixel_formats[gl->format - 1].native_visual_id);
     if (!gl->gbm_surface)
         ERR("Failed to create GBM surface\n");
 

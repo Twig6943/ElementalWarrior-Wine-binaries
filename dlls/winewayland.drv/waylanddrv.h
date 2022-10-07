@@ -482,6 +482,13 @@ static inline BOOL intersect_rect(RECT *dst, const RECT *src1, const RECT *src2)
     return !IsRectEmpty(dst);
 }
 
+static inline BOOL contains_rect(RECT *outer, const RECT *inner)
+{
+    POINT tl = {inner->left, inner->top};
+    POINT br = {inner->right - 1, inner->bottom - 1};
+    return PtInRect(outer, tl) && PtInRect(outer, br);
+}
+
 static inline HWND get_focus(void)
 {
     GUITHREADINFO info;

@@ -940,7 +940,7 @@ static void wayland_surface_set_main_output(struct wayland_surface *surface,
     {
         wayland_surface_tree_set_main_output(surface, output);
         if (surface->hwnd)
-            send_message(surface->hwnd, WM_WAYLAND_SURFACE_OUTPUT_CHANGE, 0, 0);
+            send_message(surface->hwnd, WM_WAYLAND_SURFACE_OUTPUT_CHANGE, 0, 1);
     }
 }
 

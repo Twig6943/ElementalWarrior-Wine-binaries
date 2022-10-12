@@ -79,6 +79,8 @@ struct wayland_win_data
     BOOL           wayland_surface_needs_update;
     /* Whether we have a pending/unprocessed WM_WAYLAND_STATE_UPDATE message */
     BOOL           pending_state_update_message;
+    /* The serial of the next expected WM_WAYLAND_SURFACE_OUTPUT_CHANGE message */
+    UINT           pending_surface_output_change_serial;
 };
 
 static struct wayland_mutex win_data_mutex =
@@ -894,6 +896,38 @@ static struct wayland_win_data *update_wayland_state(struct wayland_win_data *da
             wayland_window_surface_flush(data->window_surface);
     }
 
+    if (data->wayland_surface && data->wayland_surface->xdg_toplevel &&
+        data->wayland_surface->main_output)
+    {
+        struct wayland_output *output = data->wayland_surface->main_output;
+        /* We increase the serial even if we don't end up posting
+         * WM_WAYLAND_SURFACE_OUTPUT_CHANGE, to ensure all previous pending
+         * requests are invalidated. */
+        data->pending_surface_output_change_serial++;
+        /* Skip zero if we wrap around, since it has a special meaning. */
+        if (data->pending_surface_output_change_serial == 0)
+            data->pending_surface_output_change_serial++;
+
+        /* To maintain some degree of consistency between the Wayland surface and
+         * Windows window positioning, place top-level windows on the output
+         * dictated by the compositor. We position the window at the origin of that
+         * output to maximize the window area that is accessible by mouse events.
+         * We perform the move if the window:
+         * 1. is not already at origin, and
+         * 2. is not minimized
+         * 3. is not fullscreen */
+        if ((data->window_rect.left != output->x || data->window_rect.top != output->y) &&
+            !(NtUserGetWindowLongW(data->hwnd, GWL_STYLE) & WS_MINIMIZE) &&
+            !data->fullscreen)
+        {
+            TRACE("hwnd=%p window_rect=%s not at origin %dx%d, scheduling move\n",
+                  data->hwnd, wine_dbgstr_rect(&data->window_rect),
+                  output->x, output->y);
+            NtUserPostMessage(hwnd, WM_WAYLAND_SURFACE_OUTPUT_CHANGE,
+                              data->pending_surface_output_change_serial, 0);
+        }
+    }
+
     return data;
 }
 
@@ -1449,7 +1483,8 @@ static void handle_wm_wayland_configure(HWND hwnd)
     }
 }
 
-static void handle_wm_wayland_surface_output_change(HWND hwnd)
+static void handle_wm_wayland_surface_output_change(HWND hwnd, UINT serial,
+                                                    BOOL resize)
 {
     struct wayland_win_data *data;
     struct wayland_surface *wsurface;
@@ -1457,9 +1492,16 @@ static void handle_wm_wayland_surface_output_change(HWND hwnd)
     TRACE("hwnd=%p\n", hwnd);
 
     data = wayland_win_data_get(hwnd);
+    if (serial == 0) serial = ++data->pending_surface_output_change_serial;
+    if (serial != data->pending_surface_output_change_serial)
+    {
+        TRACE("hwnd=%p output change request has superseded serial\n", hwnd);
+        goto out;
+
+    }
     if (!data || !data->wayland_surface || !data->wayland_surface->xdg_surface)
     {
-        TRACE("hwnd=%p has no suitable wayland surface, returning\n", hwnd);
+        TRACE("hwnd=%p has no suitable wayland surface\n", hwnd);
         goto out;
     }
 
@@ -1487,7 +1529,7 @@ static void handle_wm_wayland_surface_output_change(HWND hwnd)
         /* If we have a configuration that has size requirements (maximized or
          * fullscreen), resize the window to ensure it matches the expected
          * Wayland size (taking the new output scale into account). */
-        if (conf && conf->width > 0 && conf->height > 0 &&
+        if (resize && conf && conf->width > 0 && conf->height > 0 &&
             ((conf->configure_flags & WAYLAND_CONFIGURE_FLAG_MAXIMIZED) ||
              (conf->configure_flags & WAYLAND_CONFIGURE_FLAG_FULLSCREEN)))
         {
@@ -1585,7 +1627,7 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         break;
     case WM_WAYLAND_SURFACE_OUTPUT_CHANGE:
-        handle_wm_wayland_surface_output_change(hwnd);
+        handle_wm_wayland_surface_output_change(hwnd, wp, lp == 1);
         break;
     default:
         FIXME("got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (long)wp, lp);

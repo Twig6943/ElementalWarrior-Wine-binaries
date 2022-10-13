@@ -720,12 +720,43 @@ static BOOL wayland_win_data_update_wayland_xdg_state(struct wayland_win_data *d
     return TRUE;
 }
 
+static BOOL wayland_win_data_is_fullscreen_with_overshoot(struct wayland_win_data *data)
+{
+    RECT monitor_rect;
+    struct wayland_output *output;
+
+    if (!data->fullscreen) return FALSE;
+    if (!data->wayland_surface) return FALSE;
+
+    output = data->wayland_surface->main_output;
+    if (!output || !output->current_wine_mode) return FALSE;
+
+    SetRect(&monitor_rect, output->x, output->y,
+            output->x + output->current_wine_mode->width,
+            output->y + output->current_wine_mode->height);
+
+    return data->window_rect.left < monitor_rect.left &&
+           data->window_rect.top < monitor_rect.top &&
+           data->window_rect.right >= monitor_rect.right &&
+           data->window_rect.bottom >= monitor_rect.bottom;
+}
+
 static void wayland_win_data_get_wine_size_for_conf(struct wayland_win_data *data,
                                                     struct wayland_surface_configure *conf,
                                                     int *wine_width, int *wine_height)
 {
     if ((conf->configure_flags & WAYLAND_CONFIGURE_FLAG_FULLSCREEN) &&
-        !(conf->configure_flags & WAYLAND_CONFIGURE_FLAG_MAXIMIZED))
+        wayland_win_data_is_fullscreen_with_overshoot(data))
+    {
+        /* If the window is fullscreen while overshooting the monitor bounds
+         * don't try to resize it. Forcing the Wayland preferred size in such
+         * cases may trigger an endless loop of resizes while both the
+         * compositor and the app try to enforce different window sizes. */
+        *wine_width = data->window_rect.right - data->window_rect.left;
+        *wine_height = data->window_rect.bottom - data->window_rect.top;
+    }
+    else if ((conf->configure_flags & WAYLAND_CONFIGURE_FLAG_FULLSCREEN) &&
+             !(conf->configure_flags & WAYLAND_CONFIGURE_FLAG_MAXIMIZED))
     {
         wayland_surface_find_wine_fullscreen_fit(data->wayland_surface,
                                                  conf->width, conf->height,

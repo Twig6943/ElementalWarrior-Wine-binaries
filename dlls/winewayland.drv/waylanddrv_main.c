@@ -133,6 +133,7 @@ const struct user_driver_funcs waylanddrv_funcs =
     .pMapVirtualKeyEx = WAYLAND_MapVirtualKeyEx,
     .pProcessEvents = WAYLAND_ProcessEvents,
     .pSetCursor = WAYLAND_SetCursor,
+    .pSetCursorPos = WAYLAND_SetCursorPos,
     .pSetLayeredWindowAttributes = WAYLAND_SetLayeredWindowAttributes,
     .pSetWindowRgn = WAYLAND_SetWindowRgn,
     .pSetWindowStyle = WAYLAND_SetWindowStyle,

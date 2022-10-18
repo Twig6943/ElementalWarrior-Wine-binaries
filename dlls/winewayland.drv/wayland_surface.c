@@ -1283,6 +1283,10 @@ void wayland_surface_update_pointer_constraint(struct wayland_surface *surface)
     RECT client_clip_rect;
     BOOL needs_lock = FALSE;
     BOOL needs_confine = FALSE;
+    BOOL set_cursor_pos = surface->set_cursor_pos;
+
+    /* Treat constraint updates triggered by SetCursorPos as single-shot. */
+    surface->set_cursor_pos = FALSE;
 
     if (!wayland->zwp_pointer_constraints_v1 || !wayland->pointer.wl_pointer)
         return;
@@ -1338,11 +1342,21 @@ void wayland_surface_update_pointer_constraint(struct wayland_surface *surface)
         /* To consider confining the pointer we must have an effective clip,
          * otherwise confininement makes no difference. */
         BOOL confine_clip = !EqualRect(&clip_rect, &vscreen_rect);
+        /* We may need to unlock the cursor if it is visible or we locked
+         * because it was clipped but now the clip is gone. */
+        BOOL needs_unlock =
+            wayland->pointer.locked_reason != WAYLAND_POINTER_LOCKED_REASON_NONE &&
+            (wayland->pointer.hcursor ||
+             ((wayland->pointer.locked_reason & WAYLAND_POINTER_LOCKED_REASON_CLIP) && !lock_clip));
 
         /* If the cursor is not visible, and we have an lock clip, lock.
          * Otherwise if the cursor is visible check if we need to confine. */
-        if (!wayland->pointer.hcursor && lock_clip)
+        if (!needs_unlock && !wayland->pointer.hcursor && (lock_clip || set_cursor_pos))
         {
+            if (lock_clip)
+                wayland->pointer.locked_reason |= WAYLAND_POINTER_LOCKED_REASON_CLIP;
+            if (set_cursor_pos)
+                wayland->pointer.locked_reason |= WAYLAND_POINTER_LOCKED_REASON_SET_CURSOR_POS;
             needs_lock = TRUE;
         }
         else if (wayland->pointer.hcursor && confine_clip)
@@ -1350,6 +1364,8 @@ void wayland_surface_update_pointer_constraint(struct wayland_surface *surface)
             needs_confine = TRUE;
         }
     }
+
+    if (!needs_lock) wayland->pointer.locked_reason = WAYLAND_POINTER_LOCKED_REASON_NONE;
 
     /* Destroy unneeded interface objects. */
     if (!needs_lock && surface->zwp_locked_pointer_v1)

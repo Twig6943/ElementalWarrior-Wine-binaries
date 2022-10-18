@@ -116,6 +116,14 @@ enum wayland_pointer_constraint
     WAYLAND_POINTER_CONSTRAINT_RETAIN_CLIP,
     WAYLAND_POINTER_CONSTRAINT_SYSTEM_CLIP,
     WAYLAND_POINTER_CONSTRAINT_UNSET_CLIP,
+    WAYLAND_POINTER_CONSTRAINT_SET_CURSOR_POS,
+};
+
+enum wayland_pointer_locked_reason
+{
+    WAYLAND_POINTER_LOCKED_REASON_NONE = 0,
+    WAYLAND_POINTER_LOCKED_REASON_SET_CURSOR_POS = (1 << 0),
+    WAYLAND_POINTER_LOCKED_REASON_CLIP = (1 << 1),
 };
 
 /**********************************************************************
@@ -168,6 +176,7 @@ struct wayland_pointer
     struct wp_viewport *cursor_wp_viewport;
     uint32_t enter_serial;
     struct wayland_cursor *cursor;
+    enum wayland_pointer_locked_reason locked_reason;
     HCURSOR hcursor;
     struct zwp_relative_pointer_v1 *zwp_relative_pointer_v1;
 };
@@ -337,6 +346,7 @@ struct wayland_surface
     BOOL drawing_allowed;
     struct wl_list child_list;
     BOOL window_fullscreen;
+    BOOL set_cursor_pos;
 };
 
 struct wayland_native_buffer
@@ -776,6 +786,7 @@ INT WAYLAND_GetKeyNameText(LONG lparam, LPWSTR buffer, INT size) DECLSPEC_HIDDEN
 UINT WAYLAND_MapVirtualKeyEx(UINT code, UINT maptype, HKL hkl) DECLSPEC_HIDDEN;
 BOOL WAYLAND_ProcessEvents(DWORD mask) DECLSPEC_HIDDEN;
 void WAYLAND_SetCursor(HCURSOR hcursor) DECLSPEC_HIDDEN;
+BOOL WAYLAND_SetCursorPos(int x, int y) DECLSPEC_HIDDEN;
 void WAYLAND_SetLayeredWindowAttributes(HWND hwnd, COLORREF key, BYTE alpha, DWORD flags) DECLSPEC_HIDDEN;
 void WAYLAND_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw) DECLSPEC_HIDDEN;
 void WAYLAND_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style) DECLSPEC_HIDDEN;

@@ -1750,6 +1750,10 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     SetRect(&wayland_surface->wayland->cursor_clip,
                             INT_MIN, INT_MIN, INT_MAX, INT_MAX);
                 }
+                else if (wp == WAYLAND_POINTER_CONSTRAINT_SET_CURSOR_POS)
+                {
+                    wayland_surface->set_cursor_pos = TRUE;
+                }
                 wayland_surface_update_pointer_constraint(wayland_surface);
             }
             wayland_surface_for_hwnd_unlock(wayland_surface);

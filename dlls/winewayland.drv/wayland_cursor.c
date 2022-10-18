@@ -745,3 +745,20 @@ BOOL WAYLAND_ClipCursor(const RECT *clip)
 
     return TRUE;
 }
+
+/***********************************************************************
+ *           WAYLAND_SetCursorPos
+ */
+BOOL WAYLAND_SetCursorPos(int x, int y)
+{
+    HWND cursor_hwnd = wayland_get_thread_cursor_hwnd();
+
+    TRACE("cursor_hwnd=%p, x=%d, y=%d\n", cursor_hwnd, x, y);
+
+    if (!cursor_hwnd) return TRUE;
+
+    send_message(cursor_hwnd, WM_WAYLAND_POINTER_CONSTRAINT_UPDATE,
+                 WAYLAND_POINTER_CONSTRAINT_SET_CURSOR_POS, 0);
+
+    return TRUE;
+}

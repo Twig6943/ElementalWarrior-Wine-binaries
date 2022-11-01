@@ -180,6 +180,9 @@ void wayland_surface_make_toplevel(struct wayland_surface *surface,
     if (parent && parent->xdg_toplevel)
         xdg_toplevel_set_parent(surface->xdg_toplevel, parent->xdg_toplevel);
 
+    if (process_name)
+        xdg_toplevel_set_app_id(surface->xdg_toplevel, process_name);
+
     wl_surface_commit(surface->wl_surface);
 
     surface->role = WAYLAND_SURFACE_ROLE_TOPLEVEL;

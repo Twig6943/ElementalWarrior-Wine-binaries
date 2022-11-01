@@ -43,6 +43,7 @@
  *          Globals
  */
 
+extern char *process_name DECLSPEC_HIDDEN;
 extern struct wl_display *process_wl_display DECLSPEC_HIDDEN;
 
 /**********************************************************************

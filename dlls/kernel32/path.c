@@ -143,9 +143,13 @@ BOOL WINAPI CopyFileExA(LPCSTR sourceFilename, LPCSTR destFilename,
  */
 BOOL WINAPI MoveFileTransactedA(const char *source, const char *dest, LPPROGRESS_ROUTINE progress, void *data, DWORD flags, HANDLE handle)
 {
-    FIXME("(%s, %s, %p, %p, %ld, %p)\n", debugstr_a(source), debugstr_a(dest), progress, data, flags, handle);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    BOOL ret;
+
+    TRACE("(%s, %s, %p, %p, %ld, %p)\n", debugstr_a(source), debugstr_a(dest), progress, data, flags, handle);
+
+    ret = MoveFileWithProgressA(source, dest, progress, data, flags);
+    FIXME("Transaction handle not finalized.");
+    return ret;
 }
 
 /**************************************************************************
@@ -153,9 +157,13 @@ BOOL WINAPI MoveFileTransactedA(const char *source, const char *dest, LPPROGRESS
  */
 BOOL WINAPI MoveFileTransactedW(const WCHAR *source, const WCHAR *dest, LPPROGRESS_ROUTINE progress, void *data, DWORD flags, HANDLE handle)
 {
-    FIXME("(%s, %s, %p, %p, %ld, %p)\n", debugstr_w(source), debugstr_w(dest), progress, data, flags, handle);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    BOOL ret;
+
+    TRACE("(%s, %s, %p, %p, %ld, %p)\n", debugstr_w(source), debugstr_w(dest), progress, data, flags, handle);
+
+    ret = MoveFileWithProgressW(source, dest, progress, data, flags);
+    FIXME("Transaction handle not finalized.");
+    return ret;
 }
 
 /**************************************************************************

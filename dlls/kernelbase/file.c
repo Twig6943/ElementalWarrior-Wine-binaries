@@ -492,6 +492,37 @@ BOOL WINAPI DECLSPEC_HOTPATCH AreFileApisANSI(void)
 
 
 /***********************************************************************
+ *           handle_progress_callback
+ * Wrapper for progress callback, if the return value is false, the copy or move operation should be cancelled
+ */
+BOOL handle_progress_callback(LPPROGRESS_ROUTINE progress, unsigned stream_count, LARGE_INTEGER total, LARGE_INTEGER total_bytes_written, unsigned int buffer_size, LARGE_INTEGER stream_bytes_transferred, BOOL *invoke_progress,
+    DWORD callback_reason, HANDLE hSourceFile, HANDLE hDestinationFile, LPVOID param)
+{
+    DWORD ret_progress;
+    LARGE_INTEGER stream_size;
+    stream_size.QuadPart = buffer_size;
+
+    if (!*invoke_progress || !progress)
+    {
+        return TRUE;
+    }
+    ret_progress = progress(total, total_bytes_written, stream_size, stream_bytes_transferred, stream_count, callback_reason, hSourceFile, hDestinationFile, param);
+
+    switch(ret_progress)
+    {
+        case PROGRESS_STOP:
+            FIXME("Handle resumable copy/move operation");
+        case PROGRESS_CANCEL:
+            return FALSE;
+        case PROGRESS_QUIET:
+            *invoke_progress = 0;
+            break;
+    }
+    return TRUE;
+}
+
+
+/***********************************************************************
  *	CopyFileExW   (kernelbase.@)
  */
 BOOL WINAPI CopyFileExW( const WCHAR *source, const WCHAR *dest, LPPROGRESS_ROUTINE progress,
@@ -501,9 +532,10 @@ BOOL WINAPI CopyFileExW( const WCHAR *source, const WCHAR *dest, LPPROGRESS_ROUT
     HANDLE h1, h2;
     FILE_BASIC_INFORMATION info;
     IO_STATUS_BLOCK io;
-    DWORD count;
-    BOOL ret = FALSE;
-    char *buffer;
+    DWORD count, res, stream_count = 0;
+    BOOL ret = FALSE, invoke_progress = 1;
+    char *buffer, *p;
+    LARGE_INTEGER total, total_written = {{0}}, stream_written = {{0}};
 
     if (!source || !dest)
     {
@@ -541,6 +573,10 @@ BOOL WINAPI CopyFileExW( const WCHAR *source, const WCHAR *dest, LPPROGRESS_ROUT
         return FALSE;
     }
 
+    if (progress) {
+        total.u.LowPart = GetFileSize(h1, (LPDWORD)&total.u.HighPart);
+    }
+
     if (!(flags & COPY_FILE_FAIL_IF_EXISTS))
     {
         BOOL same_file = FALSE;
@@ -569,15 +605,27 @@ BOOL WINAPI CopyFileExW( const WCHAR *source, const WCHAR *dest, LPPROGRESS_ROUT
         return FALSE;
     }
 
+    stream_count++;
     while (ReadFile( h1, buffer, buffer_size, &count, NULL ) && count)
     {
-        char *p = buffer;
+        p = buffer;
+        if(total_written.QuadPart == 0 && !handle_progress_callback(progress, stream_count, total, total_written,buffer_size,
+            stream_written, &invoke_progress, CALLBACK_STREAM_SWITCH, h1, h2, param))
+        {
+            break;
+        }
         while (count != 0)
         {
-            DWORD res;
             if (!WriteFile( h2, p, count, &res, NULL ) || !res) goto done;
+            total_written.QuadPart += res;
+            stream_written.QuadPart += res;
             p += res;
             count -= res;
+            if(!handle_progress_callback(progress, stream_count, total, total_written, buffer_size,
+                stream_written, &invoke_progress, CALLBACK_CHUNK_FINISHED, h1, h2, param))
+            {
+                break;
+            }
         }
     }
     ret =  TRUE;

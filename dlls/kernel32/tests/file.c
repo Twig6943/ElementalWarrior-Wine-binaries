@@ -6122,6 +6122,144 @@ static void test_eof(void)
     ok(ret, "failed to delete %s, error %lu\n", debugstr_a(filename), GetLastError());
 }
 
+const char * reasons[2] = {
+  "CALLBACK_CHUNK_FINISHED",
+  "CALLBACK_STREAM_SWITCH"
+};
+
+typedef struct {
+  LARGE_INTEGER TotalFileSize;
+  LARGE_INTEGER TotalBytesTransferred;
+  LARGE_INTEGER StreamSize;
+  LARGE_INTEGER StreamBytesTransferred;
+  DWORD dwStreamNumber;
+  DWORD dwCallbackReason;
+  HANDLE hSourceFile;
+  HANDLE hDestinationFile;
+} ProgressCall;
+
+typedef struct
+{
+  ProgressCall *calls;
+  int call_count;
+  int calls_size;
+} ProgressOutput;
+
+DWORD LpprogressRoutine(LARGE_INTEGER TotalFileSize, LARGE_INTEGER TotalBytesTransferred, LARGE_INTEGER StreamSize, LARGE_INTEGER StreamBytesTransferred,
+  DWORD dwStreamNumber, DWORD dwCallbackReason, HANDLE hSourceFile, HANDLE hDestinationFile, ProgressOutput *lpData)
+{
+    ProgressCall call;
+    if (dwStreamNumber > lpData->calls_size) return 0;
+    call = (ProgressCall){
+      .TotalFileSize = TotalFileSize,
+      .TotalBytesTransferred = TotalBytesTransferred,
+      .StreamSize = StreamSize,
+      .StreamBytesTransferred = StreamBytesTransferred,
+      .dwStreamNumber = dwStreamNumber,
+      .dwCallbackReason = dwCallbackReason,
+      .hSourceFile = hSourceFile,
+      .hDestinationFile = hDestinationFile
+    };
+    lpData->calls[lpData->call_count] = call;
+    lpData->call_count += 1;
+    
+    return PROGRESS_CONTINUE;
+}
+
+static void check_progress_output(ProgressOutput progress_output, int expected_stream_count)
+{
+    int i, current_stream_number = 0, last_call = progress_output.call_count-1;
+    LARGE_INTEGER transfer_sum = {{0}}, stream_sum = {{0}};
+
+    ok(progress_output.call_count > 0,"Expected some progress calls, received %d\n", progress_output.call_count);
+
+    for (i = 0; i < progress_output.call_count; i++) {
+        ProgressCall call = progress_output.calls[i];
+
+        trace("i=%d %s TotalFileSize=%lld TotalBytesTransferred=%lld dwStreamNumber=%lu StreamBytesTransferred=%lld StreamSize=%lld\n",
+          i, reasons[call.dwCallbackReason], call.TotalFileSize.QuadPart, call.TotalBytesTransferred.QuadPart, call.dwStreamNumber,
+          call.StreamBytesTransferred.QuadPart, progress_output.calls[0].StreamSize.QuadPart);
+
+        if (call.dwCallbackReason == CALLBACK_STREAM_SWITCH) {
+            current_stream_number += 1;
+
+            ok(call.dwStreamNumber == current_stream_number,
+            "Received unexpected stream number, expected %d, actual %lu\n", current_stream_number, call.dwStreamNumber);
+
+            ok(call.StreamBytesTransferred.QuadPart == 0,
+              "Received unexpected stream bytes transferred, expected %lld, actual %lld\n", call.StreamBytesTransferred.QuadPart, transfer_sum.QuadPart);
+
+            if (i > 0) {
+                ok(stream_sum.QuadPart == call.StreamSize.QuadPart,
+                "Expected full stream was transferred\n");
+            }
+
+            stream_sum.QuadPart = 0;
+        } else if (call.dwCallbackReason == CALLBACK_CHUNK_FINISHED) {
+            transfer_sum.QuadPart = call.StreamBytesTransferred.QuadPart;
+            stream_sum.QuadPart = call.StreamBytesTransferred.QuadPart;
+        }
+        ok(transfer_sum.QuadPart == call.TotalBytesTransferred.QuadPart,
+          "Wrong total bytes transferred expected %lld, actual %lld\n", transfer_sum.QuadPart, call.TotalBytesTransferred.QuadPart);
+    }
+    ok(0 == progress_output.calls[0].TotalBytesTransferred.QuadPart,
+      "Expected no bytes transferred expected %d, actual %lld\n", 0, progress_output.calls[0].TotalBytesTransferred.QuadPart);
+
+    ok(transfer_sum.QuadPart == progress_output.calls[last_call].TotalFileSize.QuadPart,
+      "Wrong total bytes summation expected %lld, actual %lld\n", transfer_sum.QuadPart,
+      progress_output.calls[progress_output.call_count].TotalFileSize.QuadPart);
+
+    ok(expected_stream_count == progress_output.calls[last_call].dwStreamNumber,
+      "Wrong expected stream count %d, actual %lu\n", expected_stream_count, progress_output.calls[last_call].dwStreamNumber);
+}
+
+static void test_WithProgress(void)
+{
+    const char *ten = "1234567890";
+    HANDLE handle;
+    char path_src[MAX_PATH],
+      path_dest[MAX_PATH],
+      tmp_path[MAX_PATH],
+      buffer[70000];
+    ProgressCall calls[50];
+    ProgressOutput progress_output;
+    int i;
+
+    if (!GetTempPathA (sizeof (tmp_path), tmp_path))
+    {
+        return;
+    }
+
+    strcat (tmp_path, "filedir\\");
+    CreateDirectoryA(tmp_path, NULL);
+
+    strcpy(path_src, tmp_path);
+    strcpy(path_dest, tmp_path);
+    strcat (path_src, "testfile.ext.ext2");
+    strcat (path_dest, "testfile2.ext.ext2");
+
+    handle = CreateFileA(path_src, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
+    for (i = 0; i < 7000; i++)
+    {
+        snprintf(buffer, 70000, "%s%s", buffer, ten);
+    }
+    for (i = 0; i < 10; i++)
+    {
+        ok(WriteFile(handle, buffer, strlen(buffer), NULL, NULL), "Could not write to file");
+    }
+    CloseHandle(handle);
+
+    progress_output = (ProgressOutput){.calls_size = 10, .call_count = 0, .calls = (ProgressCall *)&calls};
+    ok(CopyFileExA(path_src, path_dest, (LPPROGRESS_ROUTINE)LpprogressRoutine, &progress_output, NULL, 0),
+      "Failed to copy file %ld %s %s\n", GetLastError(), path_src, path_dest);
+
+    check_progress_output(progress_output, 1);
+
+    DeleteFileA(path_src);
+    DeleteFileA(path_dest);
+    RemoveDirectoryA(tmp_path);
+}
+
 START_TEST(file)
 {
     char temp_path[MAX_PATH];
@@ -6200,4 +6338,5 @@ START_TEST(file)
     test_hard_link();
     test_move_file();
     test_eof();
+    test_WithProgress();
 }

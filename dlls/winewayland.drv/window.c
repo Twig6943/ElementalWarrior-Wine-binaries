@@ -1023,12 +1023,13 @@ static void handle_wm_wayland_configure(HWND hwnd)
     struct wayland_win_data *data;
     struct wayland_surface *wsurface;
     DWORD flags, style;
-    int width, height, wine_width, wine_height;
+    int width, height, wine_width, wine_height, min_width, min_height;
     UINT swp_flags;
     BOOL needs_enter_size_move = FALSE;
     BOOL needs_exit_size_move = FALSE;
     BOOL needs_set_size = FALSE;
     BOOL needs_frame_changed = FALSE;
+    MINMAXINFO mm;
 
     if (!(data = wayland_win_data_get(hwnd))) return;
     if (!data->wayland_surface || !data->wayland_surface->xdg_toplevel)
@@ -1060,6 +1061,36 @@ static void handle_wm_wayland_configure(HWND hwnd)
     height = wsurface->pending.height;
     flags = wsurface->pending.configure_flags;
     style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
+
+    /* Ask the application for the window minimum width/height. It may not
+     * respond to the message, so we first set the system default values. */
+    memset(&mm, 0, sizeof(MINMAXINFO));
+    mm.ptMinTrackSize.x = NtUserGetSystemMetrics(SM_CXMINTRACK);
+    mm.ptMinTrackSize.y = NtUserGetSystemMetrics(SM_CYMINTRACK);
+    send_message(hwnd, WM_GETMINMAXINFO, 0, (LPARAM)&mm);
+    wayland_surface_coords_rounded_from_wine(wsurface,
+                                             mm.ptMinTrackSize.x,
+                                             mm.ptMinTrackSize.y,
+                                             &min_width, &min_height);
+
+    /* If the compositor's size hints are smaller than the minimum that the
+     * application supports, ignore the hints, except if the application is
+     * fullscreen or maximized in which case we always need to respect the
+     * requested size to avoid protocol errors. This fixes bugs in which a
+     * compositor forces applications to become so small that would be
+     * impossible to interact with them: some applications do not allow resize
+     * without going through the menus and changing their resolution. */
+    if (!(flags & (WAYLAND_CONFIGURE_FLAG_MAXIMIZED |
+                   WAYLAND_CONFIGURE_FLAG_FULLSCREEN)) &&
+        ((width != 0 && width < min_width) || (height != 0 && height < min_height)))
+    {
+        TRACE("ignoring compositor size hint (%dx%d) that is smaller than " \
+              "application minimum (%dx%d, wine=%dx%d)\n",
+              width, height, min_width, min_height,
+              (int)mm.ptMinTrackSize.x, (int)mm.ptMinTrackSize.y);
+        if (width < min_width) width = wsurface->pending.width = 0;
+        if (height < min_height) height = wsurface->pending.height = 0;
+    }
 
     /* If we are free to set our size, first try the restore size, then
      * the current size. */

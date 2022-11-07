@@ -149,6 +149,7 @@ struct wayland
     struct wl_list output_list;
     struct wl_list detached_shm_buffer_list;
     struct wl_list callback_list;
+    struct wl_list surface_list;
     struct wayland_keyboard keyboard;
     struct wayland_pointer pointer;
     DWORD last_dispatch_mask;
@@ -197,6 +198,7 @@ struct wayland_surface_configure
 
 struct wayland_surface
 {
+    struct wl_list link; /* wayland::surface_list */
     struct wayland *wayland;
     struct wl_surface *wl_surface;
     struct wl_subsurface *wl_subsurface;

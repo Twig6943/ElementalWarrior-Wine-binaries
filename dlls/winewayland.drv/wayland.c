@@ -352,6 +352,7 @@ BOOL wayland_init(struct wayland *wayland)
     wl_list_init(&wayland->output_list);
     wl_list_init(&wayland->detached_shm_buffer_list);
     wl_list_init(&wayland->callback_list);
+    wl_list_init(&wayland->surface_list);
 
     /* Populate registry */
     wl_registry_add_listener(wayland->wl_registry, &registry_listener, wayland);
@@ -417,6 +418,17 @@ void wayland_deinit(struct wayland *wayland)
         free(callback);
     }
     wayland_reschedule_wakeup_timerfd();
+
+    /* Keep getting the first surface in the list and destroy it, which also
+     * removes it from the list. We use this somewhat unusual iteration method
+     * because even wl_list_for_each_safe() is not safe against removals of
+     * arbitrary elements from the list during iteration. */
+    while (wayland->surface_list.next != &wayland->surface_list)
+    {
+        struct wayland_surface *surface =
+            wl_container_of(wayland->surface_list.next, surface, link);
+        wayland_surface_destroy(surface);
+    }
 
     if (wayland->event_notification_pipe[0] >= 0)
         close(wayland->event_notification_pipe[0]);

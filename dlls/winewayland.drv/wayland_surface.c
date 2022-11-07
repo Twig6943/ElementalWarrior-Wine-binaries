@@ -179,12 +179,15 @@ struct wayland_surface *wayland_surface_create_plain(struct wayland *wayland)
     if (!surface->wl_surface)
         goto err;
 
+    wl_list_init(&surface->link);
     wl_surface_set_user_data(surface->wl_surface, surface);
     /* Plain surfaces are unmappable, so don't draw on them. */
     surface->drawing_allowed = FALSE;
 
     surface->ref = 1;
     surface->role = WAYLAND_SURFACE_ROLE_NONE;
+
+    wl_list_insert(&wayland->surface_list, &surface->link);
 
     return surface;
 
@@ -567,6 +570,8 @@ void wayland_surface_destroy(struct wayland_surface *surface)
         wayland_surface_unref(surface->parent);
         surface->parent = NULL;
     }
+
+    wl_list_remove(&surface->link);
 
     wayland_mutex_destroy(&surface->mutex);
 

@@ -347,6 +347,7 @@ apiset ext-ms-win-eventing-pdh-l1-1-2 = pdh.dll
 apiset ext-ms-win-eventing-tdh-ext-l1-1-0 = tdh.dll
 apiset ext-ms-win-eventing-tdh-priv-l1-1-0 = tdh.dll
 apiset ext-ms-win-gaming-xinput-l1-1-0 = xinputuap.dll
+apiset ext-ms-win-dxcore-l1-1-0 = dxcore.dll
 apiset ext-ms-win-gdi-clipping-l1-1-0 = gdi32.dll
 apiset ext-ms-win-gdi-dc-create-l1-1-1 = gdi32.dll
 apiset ext-ms-win-gdi-dc-l1-2-0 = gdi32.dll

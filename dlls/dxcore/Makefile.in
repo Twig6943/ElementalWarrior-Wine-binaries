@@ -1,0 +1,8 @@
+MODULE    = dxcore.dll
+IMPORTLIB = dxcore
+IMPORTS   = gdi32 dxguid uuid wined3d user32 win32u dxgi
+EXTRAINCL = $(VKD3D_PE_CFLAGS)
+
+C_SRCS = main.c
+
+RC_SRCS = version.rc

@@ -185,3 +185,4 @@
 @ stub CM_Unregister_Device_InterfaceW
 @ stub CM_Unregister_Device_Interface_ExA
 @ stub CM_Unregister_Device_Interface_ExW
+@ stdcall CM_MapCrToWin32Err(ptr long) setupapi.CM_MapCrToWin32Err

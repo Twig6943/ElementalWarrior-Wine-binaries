@@ -683,3 +683,8 @@ CONFIGRET WINAPI CM_Register_Notification(VOID *pFilter, PVOID pContext, VOID *p
         pFilter, pContext, pCallback, pNotifyContext);
     return CR_SUCCESS;
 }
+
+DWORD WINAPI CM_MapCrToWin32Err(CONFIGRET cmReturnCode, DWORD defaultErr) {
+    FIXME("cmReturnCode %p, defaultErr %ld stub!\n", cmReturnCode, defaultErr);
+    return CR_SUCCESS;
+}

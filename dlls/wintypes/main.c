@@ -25,6 +25,8 @@
 #include "winstring.h"
 #include "wine/debug.h"
 #include "objbase.h"
+#include "roapi.h"
+
 
 #include "activation.h"
 #include "rometadataresolution.h"
@@ -358,9 +360,91 @@ HRESULT WINAPI RoResolveNamespace(HSTRING name, HSTRING windowsMetaDataDir,
                                   DWORD *metaDataFilePathsCount, HSTRING **metaDataFilePaths,
                                   DWORD *subNamespacesCount, HSTRING **subNamespaces)
 {
+    //https://learn.microsoft.com/en-us/windows/win32/api/rometadataresolution/nf-rometadataresolution-roresolvenamespace
+    //name L"Windows.Services.Store", windowsMetaDataDir L"", metaDataFilePaths 0000000000419088, subNamespaces 0000000000000000 stub!
+    const WCHAR *buffer = WindowsGetStringRawBuffer( name, NULL );
+    HSTRING *str = malloc(sizeof(HSTRING)), *str2 = malloc(sizeof(HSTRING));
+    // const WCHAR *path = L"C:\\Windows\\system32\\WinMetadata\\Windows.Services.winmd";
+    const WCHAR *path;
     FIXME("name %s, windowsMetaDataDir %s, metaDataFilePaths %p, subNamespaces %p stub!\n",
             debugstr_hstring(name), debugstr_hstring(windowsMetaDataDir),
             metaDataFilePaths, subNamespaces);
+
+    if(wcsstr(buffer, L"Windows.Storage") > 0){
+        FIXME("Found Windows.Storage \n");
+        path = L"C:\\windows\\system32\\WinMetadata\\Windows.Storage.winmd";
+        if(WindowsCreateString(path, wcslen(path), str) == S_OK) {
+            FIXME("Setting vars\n");
+            *metaDataFilePaths = str;
+            *metaDataFilePathsCount = 1;
+            FIXME("Done setting\n");
+        } else {
+            FIXME("OUT OF MEMORY");
+            return E_OUTOFMEMORY;
+        }
+        // *subNamespacesCount = 0;
+        // WindowsCreateString(L"StoreContract", wcslen(L"StoreContract"), str2);
+        // *subNamespaces = str2;
+        FIXME("S_OK\n");
+        return S_OK;
+    }
+
+    if(wcsstr(buffer, L"Windows.ApplicationModel.DesignMode") > 0){
+        FIXME("Found Windows.ApplicationModel.DesignMode \n");
+        path = L"C:\\windows\\system32\\WinMetadata\\Windows.ApplicationModel.winmd";
+        if(WindowsCreateString(path, wcslen(path), str) == S_OK) {
+            FIXME("Setting vars\n");
+            *metaDataFilePaths = str;
+            *metaDataFilePathsCount = 1;
+            FIXME("Done setting\n");
+        } else {
+            FIXME("OUT OF MEMORY");
+            return E_OUTOFMEMORY;
+        }
+        // *subNamespacesCount = 0;
+        // WindowsCreateString(L"StoreContract", wcslen(L"StoreContract"), str2);
+        // *subNamespaces = str2;
+        FIXME("S_OK\n");
+        return S_OK;
+    }
+
+    if(wcsstr(buffer, L"Windows.Services.Store") > 0){
+        FIXME("Found Windows.Services.Store \n");
+        path = L"C:\\windows\\system32\\WinMetadata\\Windows.Services.winmd";
+        if(WindowsCreateString(path, wcslen(path), str) == S_OK) {
+            FIXME("Setting vars\n");
+            *metaDataFilePaths = str;
+            *metaDataFilePathsCount = 1;
+            FIXME("Done setting\n");
+        } else {
+            FIXME("OUT OF MEMORY");
+            return E_OUTOFMEMORY;
+        }
+        // *subNamespacesCount = 0;
+        // WindowsCreateString(L"StoreContract", wcslen(L"StoreContract"), str2);
+        // *subNamespaces = str2;
+        FIXME("S_OK\n");
+        return S_OK;
+    }
+
+    if(wcsstr(buffer, L"Windows.Foundation") > 0){
+        FIXME("Found Windows.Foundation \n");
+        path = L"C:\\windows\\system32\\WinMetadata\\Windows.Foundation.winmd";
+        if(WindowsCreateString(path, wcslen(path), str) == S_OK) {
+            FIXME("Setting vars\n");
+            *metaDataFilePaths = str;
+            *metaDataFilePathsCount = 1;
+            FIXME("Done setting\n");
+        } else {
+            FIXME("OUT OF MEMORY");
+            return E_OUTOFMEMORY;
+        }
+        // *subNamespacesCount = 0;
+        // WindowsCreateString(L"StoreContract", wcslen(L"StoreContract"), str2);
+        // *subNamespaces = str2;
+        FIXME("S_OK\n");
+        return S_OK;
+    }
 
     if (!metaDataFilePaths && !subNamespaces)
         return E_INVALIDARG;

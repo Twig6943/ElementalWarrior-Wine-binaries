@@ -34,6 +34,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <stdlib.h>
+#include <sys/timerfd.h>
 #include <unistd.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
@@ -50,6 +51,15 @@ static struct wayland_mutex thread_wayland_mutex =
 };
 
 static struct wl_list thread_wayland_list = {&thread_wayland_list, &thread_wayland_list};
+
+struct wayland_callback
+{
+   struct wl_list link;
+   uintptr_t id;
+   wayland_callback_func func;
+   void *data;
+   uint64_t target_time_ms;
+};
 
 /**********************************************************************
  *          xdg_wm_base handling
@@ -239,6 +249,7 @@ BOOL wayland_init(struct wayland *wayland)
 
     wl_list_init(&wayland->output_list);
     wl_list_init(&wayland->detached_shm_buffer_list);
+    wl_list_init(&wayland->callback_list);
 
     /* Populate registry */
     wl_registry_add_listener(wayland->wl_registry, &registry_listener, wayland);
@@ -289,12 +300,19 @@ void wayland_deinit(struct wayland *wayland)
 {
     struct wayland_output *output, *output_tmp;
     struct wayland_shm_buffer *shm_buffer, *shm_buffer_tmp;
+    struct wayland_callback *callback, *callback_tmp;
 
     TRACE("%p\n", wayland);
 
     wayland_mutex_lock(&thread_wayland_mutex);
     wl_list_remove(&wayland->thread_link);
     wayland_mutex_unlock(&thread_wayland_mutex);
+
+    wl_list_for_each_safe(callback, callback_tmp, &wayland->callback_list, link)
+    {
+        wl_list_remove(&callback->link);
+        free(callback);
+    }
 
     if (wayland->event_notification_pipe[0] >= 0)
         close(wayland->event_notification_pipe[0]);
@@ -558,6 +576,133 @@ BOOL wayland_read_events_and_dispatch_process(void)
     return (wayland_dispatch_queue(process_wayland->wl_event_queue, -1) != -1);
 }
 
+static void wayland_add_callback(struct wayland *wayland, struct wayland_callback *cb)
+{
+    struct wayland_callback *cb_iter;
+
+    /* Keep callbacks ordered by target time and previous scheduling order */
+    wl_list_for_each(cb_iter, &wayland->callback_list, link)
+    {
+        if (cb_iter->target_time_ms > cb->target_time_ms)
+        {
+            wl_list_insert(cb_iter->link.prev, &cb->link);
+            break;
+        }
+    }
+
+    if (wl_list_empty(&cb->link))
+        wl_list_insert(wayland->callback_list.prev, &cb->link);
+}
+
+/**********************************************************************
+ *          wayland_schedule_thread_callback
+ *
+ * Schedule a callback to be run in the context of the current thread after
+ * the specified delay. If there is an existing callback with the specified
+ * id, it is replaced with the new one.
+ */
+void wayland_schedule_thread_callback(uintptr_t id, int delay_ms,
+                                      void (*callback)(void *), void *data)
+{
+    struct wayland *wayland = thread_wayland();
+    struct timespec ts;
+    struct wayland_callback *cb_iter, *cb = NULL;
+    uint64_t target_ms;
+
+    if (!wayland) return;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    target_ms = ts.tv_sec * 1000 + (ts.tv_nsec / 1000000) + delay_ms;
+
+    TRACE("id=%p delay_ms=%d target_ms=%llu callback=%p data=%p\n",
+          (void*)id, delay_ms, (long long unsigned)target_ms, callback, data);
+
+    /* If we have a callback with the same id, we remove it from the list so
+     * that it can be re-added at the appropriate position later in this
+     * function. */
+    wl_list_for_each(cb_iter, &wayland->callback_list, link)
+    {
+        if (cb_iter->id == id)
+        {
+            wl_list_remove(&cb_iter->link);
+            cb = cb_iter;
+            break;
+        }
+    }
+
+    if (!cb) cb = calloc(1, sizeof(*cb));
+    cb->id = id;
+    cb->func = callback;
+    cb->data = data;
+    cb->target_time_ms = target_ms;
+    wl_list_init(&cb->link);
+
+    wayland_add_callback(wayland, cb);
+}
+
+/**********************************************************************
+ *          wayland_cancel_thread_callback
+ *
+ * Cancel a callback previously scheduled in this the current thread.
+ */
+void wayland_cancel_thread_callback(uintptr_t id)
+{
+    struct wayland *wayland = thread_wayland();
+    struct wayland_callback *cb;
+
+    if (!wayland) return;
+
+    TRACE("id=%p\n", (void*)id);
+
+    wl_list_for_each(cb, &wayland->callback_list, link)
+    {
+        if (cb->id == id)
+        {
+            wl_list_remove(&cb->link);
+            free(cb);
+            break;
+        }
+    }
+}
+
+static void wayland_dispatch_thread_callbacks(struct wayland *wayland)
+{
+    struct wayland_callback *cb, *tmp;
+    struct wl_list tmp_list;
+    uint64_t time_now_ms;
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    time_now_ms = ts.tv_sec * 1000 + (ts.tv_nsec / 1000000);
+
+    /* Invoking a callback may result in scheduling additional callbacks.
+     * This can corrupt our callback list iteration, so we first move
+     * the current callbacks to a separate list and iterate over that. */
+    wl_list_init(&tmp_list);
+    wl_list_insert_list(&tmp_list, &wayland->callback_list);
+    wl_list_init(&wayland->callback_list);
+
+    /* Call all triggered callbacks and free them. */
+    wl_list_for_each_safe(cb, tmp, &tmp_list, link)
+    {
+        if (time_now_ms < cb->target_time_ms) break;
+        TRACE("invoking callback id=%p func=%p target_time_ms=%llu\n",
+              (void*)cb->id, cb->func, (long long unsigned)cb->target_time_ms);
+        cb->func(cb->data);
+        wl_list_remove(&cb->link);
+        free(cb);
+    }
+
+    /* Add untriggered callbacks back to the main list (which may now
+     * have new callbacks added from a callback invocation above). */
+    wl_list_for_each_safe(cb, tmp, &tmp_list, link)
+    {
+        wl_list_remove(&cb->link);
+        wl_list_init(&cb->link);
+        wayland_add_callback(wayland, cb);
+    }
+}
+
 static int wayland_dispatch_thread_pending(struct wayland *wayland)
 {
     char buf[64];
@@ -595,6 +740,8 @@ static BOOL wayland_process_thread_events(struct wayland *wayland, DWORD mask)
 
     wayland->last_dispatch_mask = 0;
     wayland->processing_events = TRUE;
+
+    wayland_dispatch_thread_callbacks(wayland);
 
     dispatched = wayland_dispatch_thread_pending(wayland);
 

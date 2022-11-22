@@ -430,8 +430,64 @@ static void test_IApiInformationStatics(void)
     IActivationFactory_Release(factory);
     RoUninitialize();
 }
+static HRESULT (WINAPI *pRoResolveNamespace)(HSTRING name, HSTRING windowsMetaDataDir,
+                                  DWORD packageGraphDirsCount, const HSTRING *packageGraphDirs,
+                                  DWORD *metaDataFilePathsCount, HSTRING **metaDataFilePaths,
+                                  DWORD *subNamespacesCount, HSTRING **subNamespaces);
+static void test_RoResolveNamespace(void) {
+    HSTRING name, windowsMetaDataDir, *metaDataFilePaths, *subNamespaces;
+    DWORD metaDataFilePathsCount, subNamespacesCount;
+    HRESULT hr;
+
+
+    HMODULE hmod = LoadLibraryA("wintypes.dll");
+    if(hmod == NULL) {
+        skip("Failed to load wintypes.dll\n");
+        return;
+    }
+    pRoResolveNamespace = (void*)GetProcAddress(hmod, "RoResolveNamespace");
+    if(pRoResolveNamespace == NULL) {
+        skip("Failed to get DllGetClassObject\n");
+        return;
+    }
+
+    
+    hr = WindowsCreateString( L"Windows.Services.Store", ARRAY_SIZE(L"Windows.Services.Store") - 1, &name );
+    ok(hr == S_OK, "Could not allocate HSTRING for name, hr %#lx.\n", hr);
+    wprintf(L"Testing %s\n", WindowsGetStringRawBuffer(name, 0));
+    hr = WindowsCreateString( L"", ARRAY_SIZE(L"") - 1, &windowsMetaDataDir );
+    ok(hr == S_OK, "Could not allocate HSTRING for windowsMetaDataDir, hr %#lx.\n", hr);
+    pRoResolveNamespace(name, windowsMetaDataDir,
+        0, NULL,
+        &metaDataFilePathsCount, &metaDataFilePaths,
+        &subNamespacesCount, &subNamespaces);
+
+    if (subNamespacesCount != 0)
+    {
+        wprintf(L"\nsub namespaces %d count:\n", subNamespacesCount);
+
+        for (DWORD i = 0; i < subNamespacesCount; i++)
+        {
+            wprintf(L"Subnamespace %d: %s\n", i, WindowsGetStringRawBuffer(subNamespaces[i], 0));
+        }
+    }
+
+    if (metaDataFilePathsCount != 0)
+    {
+        wprintf(L"\nmetaDataFilePathsCount %d\n", metaDataFilePathsCount);
+
+        for (DWORD i = 0; i < metaDataFilePathsCount; i++)
+        {
+            wprintf(L"Metadata file path %d: %s\n", i, WindowsGetStringRawBuffer(metaDataFilePaths[i], 0));
+        }
+        wprintf(L"\n");
+    }
+}
 
 START_TEST(wintypes)
 {
+        if (0) {
     test_IApiInformationStatics();
+        }
+    test_RoResolveNamespace();
 }

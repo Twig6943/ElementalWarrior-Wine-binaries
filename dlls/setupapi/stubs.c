@@ -667,6 +667,11 @@ CONFIGRET WINAPI CM_Request_Device_EjectW(DEVINST dev, PPNP_VETO_TYPE type, LPWS
     return CR_SUCCESS;
 }
 
+DWORD WINAPI CM_MapCrToWin32Err(CONFIGRET cmReturnCode, DWORD defaultErr) {
+    FIXME("cmReturnCode %ld, defaultErr %ld stub!\n", cmReturnCode, defaultErr);
+    return CR_SUCCESS;
+}
+
 BOOL WINAPI SetupDiGetClassRegistryPropertyW(const GUID *class, DWORD prop, DWORD *datatype, BYTE *buff, DWORD size,
     DWORD *req_size, const WCHAR *name, VOID *reserved)
 {
@@ -675,3 +680,4 @@ BOOL WINAPI SetupDiGetClassRegistryPropertyW(const GUID *class, DWORD prop, DWOR
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
+

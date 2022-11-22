@@ -602,3 +602,4 @@
 @ stdcall pSetupStringTableSetExtraData(ptr long ptr long) StringTableSetExtraData
 @ stub pSetupVerifyCatalogFile
 @ stub pSetupVerifyQueuedCatalogs
+@ stdcall CM_MapCrToWin32Err(ptr long)

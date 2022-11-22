@@ -61,6 +61,99 @@ struct wayland_callback
    uint64_t target_time_ms;
 };
 
+struct wayland_wakeup
+{
+    struct wl_list link;
+    uintptr_t id;
+    uint64_t target_time_ms;
+};
+static struct wl_list wayland_wakeup_list = {&wayland_wakeup_list, &wayland_wakeup_list};
+static int wayland_wakeup_timerfd = -1;
+
+/**********************************************************************
+ *          Wakeup handling
+ */
+
+static void wayland_add_wakeup_for_callback(struct wayland_callback *cb)
+{
+    struct wayland_wakeup *wakeup;
+
+    wakeup = calloc(1, sizeof(*wakeup));
+    wakeup->target_time_ms = cb->target_time_ms;
+    wakeup->id = cb->id;
+
+    wayland_mutex_lock(&process_wayland_mutex);
+    wl_list_insert(&wayland_wakeup_list, &wakeup->link);
+    wayland_mutex_unlock(&process_wayland_mutex);
+}
+
+static void wayland_remove_wakeup(uintptr_t id)
+{
+    struct wayland_wakeup *wakeup;
+
+    wayland_mutex_lock(&process_wayland_mutex);
+
+    wl_list_for_each(wakeup, &wayland_wakeup_list, link)
+    {
+        if (wakeup->id == id)
+        {
+            wl_list_remove(&wakeup->link);
+            free(wakeup);
+            break;
+        }
+    }
+
+    wayland_mutex_unlock(&process_wayland_mutex);
+}
+
+static void wayland_remove_past_wakeups(void)
+{
+    struct wayland_wakeup *wakeup, *tmp;
+    uint64_t time_now_ms;
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    time_now_ms = ts.tv_sec * 1000 + (ts.tv_nsec / 1000000);
+
+    wayland_mutex_lock(&process_wayland_mutex);
+
+    wl_list_for_each_safe(wakeup, tmp, &wayland_wakeup_list, link)
+    {
+        if (wakeup->target_time_ms <= time_now_ms)
+        {
+            wl_list_remove(&wakeup->link);
+            free(wakeup);
+        }
+    }
+
+    wayland_mutex_unlock(&process_wayland_mutex);
+}
+
+static void wayland_reschedule_wakeup_timerfd(void)
+{
+    uint64_t min = 0;
+    struct itimerspec its = {0};
+    struct wayland_wakeup *wakeup;
+
+    wayland_mutex_lock(&process_wayland_mutex);
+
+    wl_list_for_each(wakeup, &wayland_wakeup_list, link)
+    {
+        uint64_t wakeup_time = wakeup->target_time_ms;
+        if (min == 0 || wakeup_time < min)
+            min = wakeup_time;
+    }
+
+    TRACE("time=%llu\n", (long long unsigned)min);
+
+    its.it_value.tv_sec = min / 1000;
+    its.it_value.tv_nsec = (min % 1000) * 1000000;
+
+    timerfd_settime(wayland_wakeup_timerfd, TFD_TIMER_ABSTIME, &its, NULL);
+
+    wayland_mutex_unlock(&process_wayland_mutex);
+}
+
 /**********************************************************************
  *          xdg_wm_base handling
  */
@@ -310,9 +403,11 @@ void wayland_deinit(struct wayland *wayland)
 
     wl_list_for_each_safe(callback, callback_tmp, &wayland->callback_list, link)
     {
+        wayland_remove_wakeup(callback->id);
         wl_list_remove(&callback->link);
         free(callback);
     }
+    wayland_reschedule_wakeup_timerfd();
 
     if (wayland->event_notification_pipe[0] >= 0)
         close(wayland->event_notification_pipe[0]);
@@ -372,6 +467,10 @@ BOOL wayland_process_init(void)
 
     process_wayland = calloc(1, sizeof(*process_wayland));
     if (!process_wayland)
+        return FALSE;
+
+    wayland_wakeup_timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
+    if (!wayland_wakeup_timerfd)
         return FALSE;
 
     return wayland_init(process_wayland);
@@ -478,13 +577,17 @@ void wayland_notify_wine_monitor_change(void)
  */
 int wayland_dispatch_queue(struct wl_event_queue *queue, int timeout_ms)
 {
-    struct pollfd pfd = {0};
+    /* We need to poll up to two fds and notify threads of potential events:
+     * 1. wl_display fd: events from the compositor
+     * 2. wayland_wakeup_timerfd (per-process instance only): internally
+     *    scheduled callbacks */
+    struct pollfd pfd[2] = {0};
     BOOL is_process_queue = queue == process_wayland->wl_event_queue;
     int ret;
 
     TRACE("waiting for events with timeout=%d ...\n", timeout_ms);
 
-    pfd.fd = wl_display_get_fd(process_wl_display);
+    pfd[0].fd = wl_display_get_fd(process_wl_display);
 
     if (wl_display_prepare_read_queue(process_wl_display, queue) == -1)
     {
@@ -503,8 +606,8 @@ int wayland_dispatch_queue(struct wl_event_queue *queue, int timeout_ms)
         if (ret != -1 || errno != EAGAIN)
             break;
 
-        pfd.events = POLLOUT;
-        while ((ret = poll(&pfd, 1, timeout_ms)) == -1 && errno == EINTR) continue;
+        pfd[0].events = POLLOUT;
+        while ((ret = poll(pfd, 1, timeout_ms)) == -1 && errno == EINTR) continue;
 
         if (ret == -1)
         {
@@ -520,36 +623,67 @@ int wayland_dispatch_queue(struct wl_event_queue *queue, int timeout_ms)
         return -1;
     }
 
-    pfd.events = POLLIN;
-    while ((ret = poll(&pfd, 1, timeout_ms)) == -1 && errno == EINTR) continue;
+    if (is_process_queue)
+    {
+        pfd[1].events = POLLIN;
+        pfd[1].fd = wayland_wakeup_timerfd;
+    }
+
+    pfd[0].events = POLLIN;
+    pfd[0].revents = 0;
+    while ((ret = poll(pfd, pfd[1].events ? 2 : 1, timeout_ms)) == -1 && errno == EINTR)
+        continue;
+
+    if (!(pfd[0].revents & POLLIN))
+        wl_display_cancel_read(process_wl_display);
 
     if (ret == 0)
     {
         TRACE("... done => 0 events (timeout)\n");
-        wl_display_cancel_read(process_wl_display);
         return 0;
     }
 
     if (ret == -1)
     {
         TRACE("... failed poll errno=%d\n", errno);
-        wl_display_cancel_read(process_wl_display);
         return -1;
     }
 
-    if (wl_display_read_events(process_wl_display) == -1)
+    /* Handle wl_display fd input. */
+    if (pfd[0].revents & POLLIN)
     {
-        TRACE("... failed wl_display_read_events errno=%d\n", errno);
-        return -1;
+        if (wl_display_read_events(process_wl_display) == -1)
+        {
+            TRACE("... failed wl_display_read_events errno=%d\n", errno);
+            return -1;
+        }
+        if (is_process_queue) wayland_process_acquire();
+        ret = wl_display_dispatch_queue_pending(process_wl_display, queue);
+        if (is_process_queue) wayland_process_release();
+        if (ret == -1)
+        {
+            TRACE("... failed wl_display_dispatch_queue_pending errno=%d\n", errno);
+            return -1;
+        }
     }
 
-    if (is_process_queue) wayland_process_acquire();
-    ret = wl_display_dispatch_queue_pending(process_wl_display, queue);
-    if (is_process_queue) wayland_process_release();
-    if (ret == -1)
+    /* Handle timerfd input. */
+    if (pfd[1].revents & POLLIN)
     {
-        TRACE("... failed wl_display_dispatch_queue_pending errno=%d\n", errno);
-        return -1;
+        uint64_t num_expirations;
+        int nread;
+        while ((nread = read(pfd[1].fd, &num_expirations, sizeof(uint64_t))) == -1 &&
+                errno == EINTR)
+        {
+            continue;
+        }
+        if (nread < sizeof(uint64_t))
+        {
+            TRACE("... failed reading timerfd errno=%d\n", errno);
+            return -1;
+        }
+        wayland_remove_past_wakeups();
+        wayland_reschedule_wakeup_timerfd();
     }
 
     /* We may have read and queued events in queues other than the specified
@@ -638,6 +772,8 @@ void wayland_schedule_thread_callback(uintptr_t id, int delay_ms,
     wl_list_init(&cb->link);
 
     wayland_add_callback(wayland, cb);
+    wayland_add_wakeup_for_callback(cb);
+    wayland_reschedule_wakeup_timerfd();
 }
 
 /**********************************************************************

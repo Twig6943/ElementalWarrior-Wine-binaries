@@ -104,6 +104,7 @@ struct wayland_keyboard
     struct xkb_compose_state *xkb_compose_state;
     UINT xkb_keycode_to_vkey[256];
     WORD xkb_keycode_to_scancode[256];
+    xkb_mod_mask_t xkb_mod5_mask;
 };
 
 struct wayland_cursor

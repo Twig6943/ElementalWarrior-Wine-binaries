@@ -262,12 +262,23 @@ static struct xkb_state *_xkb_state_new_from_wine(struct wayland_keyboard *keybo
     struct xkb_state *xkb_state;
     UINT mods[] = {VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU};
     UINT toggles[] = {VK_CAPITAL, VK_NUMLOCK, VK_SCROLL};
+    xkb_mod_mask_t depressed_mods, latched_mods, locked_mods;
     int i;
 
-    /* Create a new xkb_state using the currently active layout. */
+    /* Create a new xkb_state using the currently active layout and the state
+     * of Mod5 (AltGr) only. */
     xkb_state = xkb_state_new(xkb_state_get_keymap(keyboard->xkb_state));
     if (!xkb_state) return NULL;
-    xkb_state_update_mask(xkb_state, 0, 0, 0,
+    depressed_mods = xkb_state_serialize_mods(keyboard->xkb_state,
+                                             XKB_STATE_MODS_DEPRESSED) &
+                     keyboard->xkb_mod5_mask;
+    latched_mods = xkb_state_serialize_mods(keyboard->xkb_state,
+                                           XKB_STATE_MODS_LATCHED) &
+                   keyboard->xkb_mod5_mask;
+    locked_mods = xkb_state_serialize_mods(keyboard->xkb_state,
+                                          XKB_STATE_MODS_LOCKED) &
+                  keyboard->xkb_mod5_mask;
+    xkb_state_update_mask(xkb_state, depressed_mods, latched_mods, locked_mods,
                           xkb_state_serialize_layout(keyboard->xkb_state,
                                                      XKB_STATE_LAYOUT_DEPRESSED),
                           xkb_state_serialize_layout(keyboard->xkb_state,
@@ -315,6 +326,7 @@ static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard,
     struct xkb_keymap *xkb_keymap = NULL;
     struct xkb_state *xkb_state = NULL;
     char *keymap_str;
+    xkb_mod_index_t i, num_mods;
 
     TRACE("format=%d fd=%d size=%d\n", format, fd, size);
 
@@ -333,6 +345,18 @@ static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard,
     munmap(keymap_str, size);
     if (!xkb_keymap)
         goto out;
+
+    /* Find the Mod5 (i.e., AltGr) mask */
+    wayland->keyboard.xkb_mod5_mask = 0;
+    num_mods = xkb_keymap_num_mods(xkb_keymap);
+    for (i = 0; i < num_mods; i++)
+    {
+        if (!strcmp(xkb_keymap_mod_get_name(xkb_keymap, i), "Mod5"))
+        {
+            wayland->keyboard.xkb_mod5_mask = (1 << i);
+            break;
+        }
+    }
 
     xkb_state = xkb_state_new(xkb_keymap);
     xkb_keymap_unref(xkb_keymap);

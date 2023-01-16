@@ -301,3 +301,37 @@ BOOL WAYLAND_GetCurrentDisplaySettings(LPCWSTR name, BOOL is_primary, LPDEVMODEW
 
     return ret;
 }
+
+static INT wayland_get_current_bpp(struct wayland *wayland, LPCWSTR name)
+{
+    struct wayland_output *output;
+
+    output = wayland_output_get_by_wine_name(wayland, name);
+    if (!output || !output->current_mode)
+        return 0;
+
+    return output->current_mode->bpp;
+}
+
+/***********************************************************************
+ *             GetDisplayDepth  (WAYLAND.@)
+ *
+ */
+INT WAYLAND_GetDisplayDepth(LPCWSTR name, BOOL is_primary)
+{
+    struct wayland *wayland = wayland_process_acquire();
+    INT bpp;
+
+    TRACE("(%s) wayland=%p\n", debugstr_w(name), wayland);
+
+    bpp = wayland_get_current_bpp(wayland, name);
+
+    wayland_process_release();
+
+    if (bpp > 0)
+        TRACE("=> %dbpp\n", bpp);
+    else
+        ERR("Failed to get %s display depth, returning 32.\n", wine_dbgstr_w(name));
+
+    return bpp > 0 ? bpp : 32;
+}

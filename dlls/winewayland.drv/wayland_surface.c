@@ -33,6 +33,14 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
+static void post_configure(void *data)
+{
+    HWND hwnd = (HWND)data;
+    TRACE("hwnd=%p\n", hwnd);
+    thread_wayland()->last_dispatch_mask |= QS_POSTMESSAGE;
+    NtUserPostMessage(hwnd, WM_WAYLAND_CONFIGURE, 0, 0);
+}
+
 static void handle_xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
                                          uint32_t serial)
 {
@@ -57,7 +65,24 @@ static void handle_xdg_surface_configure(void *data, struct xdg_surface *xdg_sur
         return;
     }
 
-    NtUserPostMessage(surface->hwnd, WM_WAYLAND_CONFIGURE, 0, 0);
+    /* We are handling the xdg configure event in the context of a driver
+     * MsgWaitForMultipleObjectsEx invocation, which may have blocked for some
+     * time before the event arrived. Since the last time the message loop was
+     * marked as idle (in terms of window_surface flushing) was before such
+     * wait, if we post the configure message we will continue without allowing
+     * the loop to be considered idle. This may lead Wine core to think that the
+     * app never goes idle (see flush_window_surfaces in win32u), and thus start
+     * flushing at unfortunate times (e.g., in between partial window paints),
+     * causing visual artifacts.
+     *
+     * To mitigate this, we post the configure with a small delay to give the
+     * loop some breathing space to be considered idle again.
+     *
+     * TODO: We effectively want to schedule the message for when the message
+     * queue is idle, find a better way to achieve this.
+     */
+    wayland_schedule_thread_callback((uintptr_t)surface->xdg_toplevel, 1,
+                                     post_configure, surface->hwnd);
 }
 
 /**********************************************************************
@@ -272,6 +297,7 @@ void wayland_surface_clear_role(struct wayland_surface *surface)
 
     if (surface->xdg_toplevel)
     {
+        wayland_cancel_thread_callback((uintptr_t)surface->xdg_toplevel);
         xdg_toplevel_destroy(surface->xdg_toplevel);
         surface->xdg_toplevel = NULL;
     }
@@ -514,6 +540,7 @@ void wayland_surface_destroy(struct wayland_surface *surface)
 
     if (surface->xdg_toplevel)
     {
+        wayland_cancel_thread_callback((uintptr_t)surface->xdg_toplevel);
         xdg_toplevel_destroy(surface->xdg_toplevel);
         surface->xdg_toplevel = NULL;
     }

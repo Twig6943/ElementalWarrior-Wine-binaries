@@ -345,6 +345,7 @@ void WAYLAND_DestroyWindow(HWND hwnd)
     TRACE("%p\n", hwnd);
 
     if (!(data = wayland_win_data_get(hwnd))) return;
+    wayland_clear_window_surface_last_flushed(hwnd);
     wayland_win_data_destroy(data);
 }
 

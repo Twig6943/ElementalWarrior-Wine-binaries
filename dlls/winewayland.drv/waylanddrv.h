@@ -331,6 +331,7 @@ void wayland_window_surface_flush(struct window_surface *window_surface) DECLSPE
 BOOL wayland_window_surface_needs_flush(struct window_surface *surface) DECLSPEC_HIDDEN;
 void wayland_window_surface_update_wayland_surface(struct window_surface *surface,
                                                    struct wayland_surface *wayland_surface) DECLSPEC_HIDDEN;
+void wayland_clear_window_surface_last_flushed(HWND hwnd) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Misc. helpers

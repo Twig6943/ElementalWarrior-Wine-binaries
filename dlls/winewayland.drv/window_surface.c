@@ -53,6 +53,106 @@ struct wayland_window_surface
     BITMAPINFO            info;
 };
 
+struct last_flushed
+{
+    struct wl_list link;
+    HWND hwnd;
+    struct wayland_shm_buffer *buffer;
+    BOOL owned;
+};
+
+static struct wayland_mutex last_flushed_mutex =
+{
+    PTHREAD_MUTEX_INITIALIZER, 0, 0, __FILE__ ": last_flushed_mutex"
+};
+
+static struct wl_list last_flushed_list = {&last_flushed_list, &last_flushed_list};
+
+static struct last_flushed *last_flushed_get(HWND hwnd)
+{
+    struct last_flushed *last_flushed;
+
+    wayland_mutex_lock(&last_flushed_mutex);
+
+    wl_list_for_each(last_flushed, &last_flushed_list, link)
+        if (last_flushed->hwnd == hwnd) return last_flushed;
+
+    wayland_mutex_unlock(&last_flushed_mutex);
+
+    return NULL;
+}
+
+static void last_flushed_release(struct last_flushed *last_flushed)
+{
+    if (last_flushed) wayland_mutex_unlock(&last_flushed_mutex);
+}
+
+static struct wayland_shm_buffer *get_last_flushed_buffer(HWND hwnd)
+{
+    struct last_flushed *last_flushed = last_flushed_get(hwnd);
+    struct wayland_shm_buffer *prev_flushed = last_flushed ? last_flushed->buffer : NULL;
+    last_flushed_release(last_flushed);
+    return prev_flushed;
+}
+
+static void update_last_flushed_buffer(HWND hwnd, struct wayland_shm_buffer *buffer)
+{
+    struct last_flushed *last_flushed;
+
+    last_flushed = last_flushed_get(hwnd);
+
+    TRACE("hwnd=%p buffer=%p (old_buffer=%p owned=%d)\n",
+          hwnd, buffer, last_flushed ? last_flushed->buffer : NULL,
+          last_flushed ? last_flushed->owned : FALSE);
+
+    if (last_flushed && last_flushed->owned)
+    {
+        if (last_flushed->buffer->busy)
+            last_flushed->buffer->destroy_on_release = TRUE;
+        else
+            wayland_shm_buffer_destroy(last_flushed->buffer);
+    }
+
+    if (buffer)
+    {
+        if (!last_flushed)
+        {
+            last_flushed = calloc(1, sizeof(*last_flushed));
+            last_flushed->hwnd = hwnd;
+            wayland_mutex_lock(&last_flushed_mutex);
+            wl_list_insert(&last_flushed_list, &last_flushed->link);
+        }
+        last_flushed->buffer = buffer;
+        last_flushed->owned = FALSE;
+    }
+    else if (last_flushed)
+    {
+        wl_list_remove(&last_flushed->link);
+        free(last_flushed);
+    }
+
+    last_flushed_release(last_flushed);
+}
+
+static void wayland_window_surface_destroy_buffer_queue(struct wayland_window_surface *wws)
+{
+    struct last_flushed *last_flushed = last_flushed_get(wws->hwnd);
+
+    /* Ensure the last flushed buffer is kept alive, so that we are able to
+     * copy data from it in later flushes for the same HWND, if needed. */
+    if (last_flushed && !last_flushed->owned)
+    {
+        wayland_buffer_queue_detach_buffer(wws->wayland_buffer_queue,
+                                           last_flushed->buffer, FALSE);
+        last_flushed->owned = TRUE;
+    }
+
+    last_flushed_release(last_flushed);
+
+    wayland_buffer_queue_destroy(wws->wayland_buffer_queue);
+    wws->wayland_buffer_queue = NULL;
+}
+
 static struct wayland_window_surface *wayland_window_surface_cast(
     struct window_surface *window_surface)
 {
@@ -182,10 +282,11 @@ static void wayland_window_surface_copy_to_buffer(struct wayland_window_surface 
 void wayland_window_surface_flush(struct window_surface *window_surface)
 {
     struct wayland_window_surface *wws = wayland_window_surface_cast(window_surface);
-    struct wayland_shm_buffer *buffer;
+    struct wayland_shm_buffer *buffer, *last_buffer;
     RECT damage_rect;
     BOOL needs_flush;
     HRGN surface_damage_region = NULL;
+    HRGN copy_from_window_region;
 
     window_surface->funcs->lock(window_surface);
 
@@ -222,6 +323,25 @@ void wayland_window_surface_flush(struct window_surface *window_surface)
         goto done;
     }
 
+    last_buffer = get_last_flushed_buffer(wws->hwnd);
+
+    if (last_buffer)
+    {
+        if (last_buffer != buffer)
+        {
+            HRGN copy_from_last_region = NtGdiCreateRectRgn(0, 0, 0, 0);
+            NtGdiCombineRgn(copy_from_last_region, buffer->damage_region,
+                            surface_damage_region, RGN_DIFF);
+            wayland_shm_buffer_copy(buffer, last_buffer, copy_from_last_region);
+            NtGdiDeleteObjectApp(copy_from_last_region);
+        }
+        copy_from_window_region = surface_damage_region;
+    }
+    else
+    {
+        copy_from_window_region = buffer->damage_region;
+    }
+
     wayland_window_surface_copy_to_buffer(wws, buffer, buffer->damage_region);
 
     if (!wayland_surface_commit_buffer(wws->wayland_surface, buffer,
@@ -231,6 +351,7 @@ void wayland_window_surface_flush(struct window_surface *window_surface)
     }
 
     wayland_shm_buffer_clear_damage(buffer);
+    update_last_flushed_buffer(wws->hwnd, buffer);
 
 done:
     if (!wws->last_flush_failed) reset_bounds(&wws->bounds);
@@ -250,7 +371,7 @@ static void wayland_window_surface_destroy(struct window_surface *window_surface
     wayland_mutex_destroy(&wws->mutex);
     if (wws->wayland_surface) wayland_surface_unref(wws->wayland_surface);
     if (wws->wayland_buffer_queue)
-        wayland_buffer_queue_destroy(wws->wayland_buffer_queue);
+        wayland_window_surface_destroy_buffer_queue(wws);
     free(wws->bits);
     free(wws);
 }
@@ -342,9 +463,16 @@ void wayland_window_surface_update_wayland_surface(struct window_surface *window
     }
     else if (!wws->wayland_surface && wws->wayland_buffer_queue)
     {
-        wayland_buffer_queue_destroy(wws->wayland_buffer_queue);
-        wws->wayland_buffer_queue = NULL;
+        wayland_window_surface_destroy_buffer_queue(wws);
     }
 
     window_surface->funcs->unlock(window_surface);
+}
+
+/***********************************************************************
+ *           wayland_clear_window_surface_last_flushed
+ */
+void wayland_clear_window_surface_last_flushed(HWND hwnd)
+{
+    update_last_flushed_buffer(hwnd, NULL);
 }

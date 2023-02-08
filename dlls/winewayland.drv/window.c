@@ -1024,6 +1024,7 @@ static void handle_wm_wayland_configure(HWND hwnd)
     struct wayland_surface *wsurface;
     DWORD flags, style;
     int width, height, wine_width, wine_height, min_width, min_height;
+    int cxmintrack, cymintrack;
     UINT swp_flags;
     BOOL needs_enter_size_move = FALSE;
     BOOL needs_exit_size_move = FALSE;
@@ -1065,8 +1066,10 @@ static void handle_wm_wayland_configure(HWND hwnd)
     /* Ask the application for the window minimum width/height. It may not
      * respond to the message, so we first set the system default values. */
     memset(&mm, 0, sizeof(MINMAXINFO));
-    mm.ptMinTrackSize.x = NtUserGetSystemMetrics(SM_CXMINTRACK);
-    mm.ptMinTrackSize.y = NtUserGetSystemMetrics(SM_CYMINTRACK);
+    cxmintrack = mm.ptMinTrackSize.x = NtUserGetSystemMetrics(SM_CXMINTRACK);
+    cymintrack = mm.ptMinTrackSize.y = NtUserGetSystemMetrics(SM_CYMINTRACK);
+    mm.ptMaxTrackSize.x = NtUserGetSystemMetrics(SM_CXMAXTRACK);
+    mm.ptMaxTrackSize.y = NtUserGetSystemMetrics(SM_CYMAXTRACK);
     send_message(hwnd, WM_GETMINMAXINFO, 0, (LPARAM)&mm);
     wayland_surface_coords_rounded_from_wine(wsurface,
                                              mm.ptMinTrackSize.x,
@@ -1170,6 +1173,15 @@ static void handle_wm_wayland_configure(HWND hwnd)
      * surface size it accepts, so don't allow the app to change it. */
     if (flags & (WAYLAND_CONFIGURE_FLAG_MAXIMIZED|WAYLAND_CONFIGURE_FLAG_FULLSCREEN))
         swp_flags |= SWP_NOSENDCHANGING;
+    /* If the maximum size the app allows is less than the minimum window size,
+     * nothing good can come from the app changing the size. */
+    if (mm.ptMaxTrackSize.x < cxmintrack || mm.ptMaxTrackSize.y < cymintrack)
+    {
+        TRACE("disallowing WM_WINDOWPOSCHANGING, app max %ldx%ld < min %dx%d\n",
+              (long)mm.ptMaxTrackSize.x, (long)mm.ptMaxTrackSize.y,
+              cxmintrack, cymintrack);
+        swp_flags |= SWP_NOSENDCHANGING;
+    }
 
     NtUserSetWindowPos(hwnd, 0, 0, 0, wine_width, wine_height, swp_flags);
 

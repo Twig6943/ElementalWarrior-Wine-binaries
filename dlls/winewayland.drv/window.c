@@ -1168,7 +1168,16 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         break;
     case WM_WAYLAND_CONFIGURE:
-        handle_wm_wayland_configure(hwnd);
+        {
+            struct wayland_win_data *data = wayland_win_data_get(hwnd);
+            BOOL postpone = data && data->handling_wayland_configure_event;
+            /* Don't process nested WM_WAYLAND_CONFIGURE messages, schedule them for
+             * a bit later instead. */
+            if (postpone && data->wayland_surface)
+                wayland_surface_schedule_wm_configure(data->wayland_surface);
+            wayland_win_data_release(data);
+            if (!postpone) handle_wm_wayland_configure(hwnd);
+        }
         break;
     default:
         FIXME("got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (long)wp, lp);

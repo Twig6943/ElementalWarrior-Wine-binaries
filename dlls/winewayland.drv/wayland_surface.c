@@ -81,8 +81,7 @@ static void handle_xdg_surface_configure(void *data, struct xdg_surface *xdg_sur
      * TODO: We effectively want to schedule the message for when the message
      * queue is idle, find a better way to achieve this.
      */
-    wayland_schedule_thread_callback((uintptr_t)surface->xdg_toplevel, 1,
-                                     post_configure, surface->hwnd);
+    wayland_surface_schedule_wm_configure(surface);
 }
 
 /**********************************************************************
@@ -719,6 +718,20 @@ void wayland_surface_ensure_mapped(struct wayland_surface *surface)
     }
 
     wayland_mutex_unlock(&surface->mutex);
+}
+
+/**********************************************************************
+ *          wayland_surface_schedule_wm_configure
+ *
+ * Schedule the posting of a WM_WAYLAND_CONFIGURE event.
+ */
+void wayland_surface_schedule_wm_configure(struct wayland_surface *surface)
+{
+    if (surface->xdg_toplevel)
+    {
+        wayland_schedule_thread_callback((uintptr_t)surface->xdg_toplevel, 1,
+                                         post_configure, surface->hwnd);
+    }
 }
 
 /**********************************************************************

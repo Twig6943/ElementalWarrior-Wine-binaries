@@ -127,6 +127,7 @@ struct wayland_pointer
     struct wl_pointer *wl_pointer;
     struct wayland_surface *focused_surface;
     struct wl_surface *cursor_wl_surface;
+    struct wp_viewport *cursor_wp_viewport;
     uint32_t enter_serial;
     struct wayland_cursor *cursor;
     HCURSOR hcursor;

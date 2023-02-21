@@ -37,6 +37,7 @@
 #include "wine/debug.h"
 #include "wine/server.h"
 
+#include <math.h>
 #include <stdlib.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
@@ -601,6 +602,37 @@ void wayland_pointer_update_cursor_from_win32(struct wayland_pointer *pointer,
     wl_surface_attach(pointer->cursor_wl_surface, pointer->cursor->wl_buffer, 0, 0);
     wl_surface_damage_buffer(pointer->cursor_wl_surface, 0, 0,
                              wayland_cursor->width, wayland_cursor->height);
+
+    /* Scale the cursor */
+    if (pointer->focused_surface)
+    {
+        double scale = wayland_surface_get_buffer_scale(pointer->focused_surface);
+
+        /* Setting only the viewport is enough, but some compositors don't
+         * support wp_viewport for cursor surfaces, so also set the buffer
+         * scale. Note that setting viewport destination overrides
+         * the buffer scale, so it's fine to set both. */
+        wl_surface_set_buffer_scale(pointer->cursor_wl_surface, round(scale));
+
+        if (pointer->cursor_wp_viewport)
+        {
+            int width, height;
+
+            wayland_surface_coords_rounded_from_wine(pointer->focused_surface,
+                    pointer->cursor->width,
+                    pointer->cursor->height,
+                    &width, &height);
+            wp_viewport_set_destination(pointer->cursor_wp_viewport, width, height);
+        }
+    }
+    else
+    {
+        wl_surface_set_buffer_scale(pointer->cursor_wl_surface, 1);
+
+        if (pointer->cursor_wp_viewport)
+            wp_viewport_set_destination(pointer->cursor_wp_viewport, -1, -1);
+    }
+
 
     wl_surface_commit(pointer->cursor_wl_surface);
 

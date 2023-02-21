@@ -240,12 +240,25 @@ void wayland_pointer_init(struct wayland_pointer *pointer, struct wayland *wayla
     wl_pointer_add_listener(wayland->pointer.wl_pointer, &pointer_listener, wayland);
     wayland->pointer.cursor_wl_surface =
         wl_compositor_create_surface(wayland->wl_compositor);
+    if (wayland->wp_viewporter)
+    {
+        wayland->pointer.cursor_wp_viewport =
+            wp_viewporter_get_viewport(wayland->wp_viewporter,
+                                       wayland->pointer.cursor_wl_surface);
+    }
+    else
+    {
+        wayland->pointer.cursor_wp_viewport = NULL;
+    }
 }
 
 void wayland_pointer_deinit(struct wayland_pointer *pointer)
 {
     if (pointer->wl_pointer)
         wl_pointer_destroy(pointer->wl_pointer);
+
+    if (pointer->cursor_wp_viewport)
+        wp_viewport_destroy(pointer->cursor_wp_viewport);
 
     if (pointer->cursor_wl_surface)
         wl_surface_destroy(pointer->cursor_wl_surface);

@@ -380,6 +380,7 @@ void wayland_cursor_destroy(struct wayland_cursor *wayland_cursor) DECLSPEC_HIDD
 void wayland_pointer_update_cursor_from_win32(struct wayland_pointer *pointer,
                                               HCURSOR handle) DECLSPEC_HIDDEN;
 BOOL wayland_init_set_cursor(void) DECLSPEC_HIDDEN;
+void wayland_reapply_thread_cursor(void) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  *          Misc. helpers

@@ -104,6 +104,7 @@ static void pointer_handle_enter(void *data, struct wl_pointer *pointer,
         TRACE("surface=%p hwnd=%p\n", wayland_surface, wayland_surface->hwnd);
         wayland->pointer.focused_surface = wayland_surface;
         wayland->pointer.enter_serial = serial;
+        wayland_reapply_thread_cursor();
         /* Handle the enter as a motion, to account for cases where the
          * window first appears beneath the pointer and won't get a separate
          * motion event. */

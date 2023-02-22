@@ -370,6 +370,29 @@ static HWND wayland_get_thread_cursor_hwnd(void)
 }
 
 /***********************************************************************
+ *           wayland_reapply_thread_cursor
+ *
+ *  Reapply the cursor settings in the current thread.
+ */
+void wayland_reapply_thread_cursor(void)
+{
+    HWND cursor_hwnd = wayland_get_thread_cursor_hwnd();
+
+    TRACE("cursor_hwnd=%p\n", cursor_hwnd);
+
+    if (!cursor_hwnd) return;
+
+    /* Invalidate the set cursor cache, so that next update is
+     * unconditionally applied. */
+    __atomic_store_n(&last_cursor, invalid_cursor, __ATOMIC_SEQ_CST);
+    /* Reapply the current cursor, using NtUserSetCursor() instead of
+     * directly calling our driver function, so that the per-thread cursor
+     * visibility state (i.e., ShowCursor()), which is difficult to access
+     * otherwise, is taken into account. */
+    NtUserSetCursor(NtUserGetCursor());
+}
+
+/***********************************************************************
  *           WAYLAND_SetCursor
  */
 void WAYLAND_SetCursor(HCURSOR hcursor)

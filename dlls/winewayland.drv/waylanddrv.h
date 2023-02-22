@@ -63,6 +63,7 @@ enum wayland_window_message
     WM_WAYLAND_CONFIGURE,
     WM_WAYLAND_STATE_UPDATE,
     WM_WAYLAND_SURFACE_OUTPUT_CHANGE,
+    WM_WAYLAND_REAPPLY_CURSOR,
 };
 
 enum wayland_surface_role

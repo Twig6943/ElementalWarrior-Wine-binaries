@@ -1341,6 +1341,10 @@ static void handle_wm_wayland_monitor_change(struct wayland *wayland)
      *    configuration sequence which happens under the win32u display lock. */
     wl_list_for_each(surface, &wayland->surface_list, link)
         NtUserPostMessage(surface->hwnd, WM_WAYLAND_STATE_UPDATE, 0, 0);
+
+    /* Reapply the cursor to take updated monitor information (e.g., scaling)
+     * into account. */
+    NtUserPostThreadMessage(wayland->thread_id, WM_WAYLAND_REAPPLY_CURSOR, 0, 0);
 }
 
 static void handle_wm_wayland_configure(HWND hwnd)
@@ -1661,6 +1665,9 @@ LRESULT WAYLAND_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         break;
     case WM_WAYLAND_SURFACE_OUTPUT_CHANGE:
         handle_wm_wayland_surface_output_change(hwnd, wp, lp == 1);
+        break;
+    case WM_WAYLAND_REAPPLY_CURSOR:
+        wayland_reapply_thread_cursor();
         break;
     default:
         FIXME("got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (long)wp, lp);

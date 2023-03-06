@@ -675,3 +675,16 @@ BOOL WINAPI SetupDiGetClassRegistryPropertyW(const GUID *class, DWORD prop, DWOR
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
+
+CONFIGRET WINAPI CM_Register_Notification(VOID *pFilter, PVOID pContext, VOID *pCallback,
+    VOID *pNotifyContext)
+{
+    FIXME("pFilter %p, pContext %p, pCallback %p, pNotifyContext %p stub!\n",
+        pFilter, pContext, pCallback, pNotifyContext);
+    return CR_SUCCESS;
+}
+
+DWORD WINAPI CM_MapCrToWin32Err(CONFIGRET cmReturnCode, DWORD defaultErr) {
+    FIXME("cmReturnCode %p, defaultErr %ld stub!\n", cmReturnCode, defaultErr);
+    return CR_SUCCESS;
+}

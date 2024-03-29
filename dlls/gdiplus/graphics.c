@@ -5448,7 +5448,7 @@ GpStatus gdip_format_string(GpGraphics *graphics, HDC hdc,
 
         bounds.Width = size.cx;
 
-        if(height + size.cy > nheight)
+        if(height + size.cy > nheight && (format->attr & StringFormatFlagsNoClip) == 0)
         {
             if (format->attr & StringFormatFlagsLineLimit)
                 break;

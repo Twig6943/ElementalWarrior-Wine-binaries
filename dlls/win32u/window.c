@@ -1787,6 +1787,9 @@ static void update_surface_region( HWND hwnd )
 done:
     if (shape) NtGdiDeleteObjectApp( shape );
     release_win_ptr( win );
+
+    vulkan_set_region( hwnd, region );
+    if (region) NtGdiDeleteObjectApp( region );
 }
 
 

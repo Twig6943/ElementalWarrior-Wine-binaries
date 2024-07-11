@@ -36,6 +36,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(waylanddrv);
 
+#define UWS_FORCE_ROLE_UPDATE 0x01
 
 /**********************************************************************
  *       get_win_monitor_dpi
@@ -215,14 +216,18 @@ static void reapply_cursor_clipping(void)
     NtUserSetThreadDpiAwarenessContext(context);
 }
 
-static void wayland_win_data_update_wayland_surface(struct wayland_win_data *data)
+static void wayland_win_data_update_wayland_state(struct wayland_win_data *data);
+
+static void wayland_win_data_update_wayland_surface(struct wayland_win_data *data, UINT flags)
 {
     struct wayland_surface *surface = data->wayland_surface;
-    struct wayland_win_data *parent_data;
+    struct wayland_win_data *parent_data, *wwd;
     enum wayland_surface_role role;
+    BOOL surface_changed = FALSE;
+    struct wayland_client_surface *client = NULL;
     WCHAR text[1024];
 
-    TRACE("hwnd=%p\n", data->hwnd);
+    TRACE("hwnd=%p flags=0x%x\n", data->hwnd, flags);
 
     if (NtUserGetWindowLongW(data->hwnd, GWL_STYLE) & WS_VISIBLE)
     {
@@ -236,19 +241,33 @@ static void wayland_win_data_update_wayland_surface(struct wayland_win_data *dat
         role = WAYLAND_SURFACE_ROLE_NONE;
 
     /* We can temporarily remove a role from a wayland surface and add it back,
-     * but we can't change a surface's role.
-     * TODO: Recreate the surface to allow role change. */
-    if (surface && role && surface->role && role != surface->role) goto out;
+     * but we can't change a surface's role. */
+    if (surface && role && surface->role && role != surface->role)
+    {
+        if (data->window_surface)
+            wayland_window_surface_update_wayland_surface(data->window_surface, NULL, NULL);
+        pthread_mutex_lock(&surface->mutex);
+        if (surface->client) client = wayland_surface_get_client(surface);
+        pthread_mutex_unlock(&surface->mutex);
+        wayland_surface_destroy(surface);
+        surface = NULL;
+    }
 
     /* Ensure that we have a wayland surface. */
-    if (!surface && !(surface = wayland_surface_create(data->hwnd))) goto out;
+    if (!surface)
+    {
+        surface = wayland_surface_create(data->hwnd);
+        surface_changed = data->wayland_surface || surface;
+        if (!surface) goto out;
+    }
 
     pthread_mutex_lock(&surface->mutex);
 
     if ((role == WAYLAND_SURFACE_ROLE_TOPLEVEL) != !!(surface->xdg_toplevel) ||
         (role == WAYLAND_SURFACE_ROLE_SUBSURFACE) != !!(surface->wl_subsurface) ||
         (role == WAYLAND_SURFACE_ROLE_SUBSURFACE &&
-         surface->parent_weak_ref && surface->parent_weak_ref->hwnd != parent_data->hwnd))
+         surface->parent_weak_ref && surface->parent_weak_ref->hwnd != parent_data->hwnd) ||
+        (flags & UWS_FORCE_ROLE_UPDATE))
     {
         /* If we have a pre-existing surface ensure it has no role. */
         if (data->wayland_surface) wayland_surface_clear_role(surface);
@@ -273,6 +292,7 @@ static void wayland_win_data_update_wayland_surface(struct wayland_win_data *dat
     }
 
     wayland_win_data_get_config(data, &surface->window);
+    if (client) wayland_surface_attach_client(surface, client);
 
     pthread_mutex_unlock(&surface->mutex);
 
@@ -287,6 +307,22 @@ static void wayland_win_data_update_wayland_surface(struct wayland_win_data *dat
 out:
     TRACE("hwnd=%p surface=%p=>%p\n", data->hwnd, data->wayland_surface, surface);
     data->wayland_surface = surface;
+    if (client) wayland_client_surface_release(client);
+
+    /* If the surface for this hwnd changed, update child surfaces. */
+    if (surface_changed)
+    {
+        RB_FOR_EACH_ENTRY(wwd, &win_data_rb, struct wayland_win_data, entry)
+        {
+            if (wwd->wayland_surface && NtUserGetAncestor(wwd->hwnd, GA_PARENT) == data->hwnd)
+            {
+                /* wayland_win_data_update_wayland_surface doesn't detect a surface
+                 * change without a window change, so force a role update. */
+                wayland_win_data_update_wayland_surface(wwd, UWS_FORCE_ROLE_UPDATE);
+                if (wwd->wayland_surface) wayland_win_data_update_wayland_state(wwd);
+            }
+        }
+    }
 }
 
 static void wayland_win_data_update_wayland_state(struct wayland_win_data *data)
@@ -520,7 +556,7 @@ void WAYLAND_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
     if (data->window_surface) window_surface_release(data->window_surface);
     data->window_surface = surface;
 
-    wayland_win_data_update_wayland_surface(data);
+    wayland_win_data_update_wayland_surface(data, 0);
     if (data->wayland_surface) wayland_win_data_update_wayland_state(data);
 
     wayland_win_data_release(data);

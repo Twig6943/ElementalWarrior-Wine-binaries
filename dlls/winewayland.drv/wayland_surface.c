@@ -1004,6 +1004,37 @@ err:
     return NULL;
 }
 
+/**********************************************************************
+ *          wayland_surface_attach_client
+ */
+void wayland_surface_attach_client(struct wayland_surface *surface,
+                                   struct wayland_client_surface *client)
+{
+    assert(!surface->client && client);
+
+    if (client->wl_subsurface) wl_subsurface_destroy(client->wl_subsurface);
+
+    /* Create a new subsurface that it is attached to the proper parent. */
+    client->wl_subsurface =
+        wl_subcompositor_get_subsurface(process_wayland.wl_subcompositor,
+                                        client->wl_surface,
+                                        surface->wl_surface);
+    if (!client->wl_subsurface)
+    {
+        ERR("Failed to create client wl_subsurface\n");
+        return;
+    }
+    /* Present contents independently of the parent surface. */
+    wl_subsurface_set_desync(client->wl_subsurface);
+
+    InterlockedIncrement(&client->ref);
+    surface->client = client;
+
+    wayland_surface_reconfigure_client(surface);
+    /* Commit to apply subsurface positioning. */
+    wl_surface_commit(surface->wl_surface);
+}
+
 static void dummy_buffer_release(void *data, struct wl_buffer *buffer)
 {
     struct wayland_shm_buffer *shm_buffer = data;

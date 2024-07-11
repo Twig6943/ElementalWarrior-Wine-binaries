@@ -267,21 +267,25 @@ static void wayland_gl_drawable_sync_size(struct wayland_gl_drawable *gl)
 static void wayland_gl_drawable_sync_surface_state(struct wayland_gl_drawable *gl)
 {
     struct wayland_surface *wayland_surface;
+    HWND hwnd = gl->hwnd;
 
-    if (!(wayland_surface = wayland_surface_lock_hwnd(gl->hwnd))) return;
-
-    wayland_surface_ensure_contents(wayland_surface);
-
-    /* Handle any processed configure request, to ensure the related
-     * surface state is applied by the compositor. */
-    if (wayland_surface->processing.serial &&
-        wayland_surface->processing.processed &&
-        wayland_surface_reconfigure(wayland_surface))
+    while (hwnd && (wayland_surface = wayland_surface_lock_hwnd(hwnd)))
     {
-        wl_surface_commit(wayland_surface->wl_surface);
-    }
+        wayland_surface_ensure_contents(wayland_surface);
 
-    pthread_mutex_unlock(&wayland_surface->mutex);
+        /* Handle any processed configure request, to ensure the related
+         * surface state is applied by the compositor. */
+        if (wayland_surface->processing.serial &&
+            wayland_surface->processing.processed &&
+            wayland_surface_reconfigure(wayland_surface))
+        {
+            wl_surface_commit(wayland_surface->wl_surface);
+        }
+
+        hwnd = wayland_surface->parent_weak_ref ?
+               wayland_surface->parent_weak_ref->hwnd : 0;
+        pthread_mutex_unlock(&wayland_surface->mutex);
+    }
 }
 
 static BOOL wgl_context_make_current(struct wgl_context *ctx, HWND draw_hwnd,

@@ -144,7 +144,7 @@ static void wayland_vulkan_surface_presented(HWND hwnd, VkResult result)
 {
     struct wayland_surface *wayland_surface;
 
-    if ((wayland_surface = wayland_surface_lock_hwnd(hwnd)))
+    while (hwnd && (wayland_surface = wayland_surface_lock_hwnd(hwnd)))
     {
         wayland_surface_ensure_contents(wayland_surface);
 
@@ -157,6 +157,8 @@ static void wayland_vulkan_surface_presented(HWND hwnd, VkResult result)
             wl_surface_commit(wayland_surface->wl_surface);
         }
 
+        hwnd = wayland_surface->parent_weak_ref ?
+               wayland_surface->parent_weak_ref->hwnd : 0;
         pthread_mutex_unlock(&wayland_surface->mutex);
     }
 }

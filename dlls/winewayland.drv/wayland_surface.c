@@ -218,6 +218,12 @@ void wayland_surface_destroy(struct wayland_surface *surface)
         surface->xdg_surface = NULL;
     }
 
+    if (surface->wl_subsurface)
+    {
+        wl_subsurface_destroy(surface->wl_subsurface);
+        surface->wl_subsurface = NULL;
+    }
+
     if (surface->wl_surface)
     {
         wl_surface_destroy(surface->wl_surface);
@@ -253,6 +259,7 @@ void wayland_surface_make_toplevel(struct wayland_surface *surface)
     surface->xdg_toplevel = xdg_surface_get_toplevel(surface->xdg_surface);
     if (!surface->xdg_toplevel) goto err;
     xdg_toplevel_add_listener(surface->xdg_toplevel, &xdg_toplevel_listener, surface->hwnd);
+    surface->role = WAYLAND_SURFACE_ROLE_TOPLEVEL;
 
     if (process_name)
         xdg_toplevel_set_app_id(surface->xdg_toplevel, process_name);
@@ -265,6 +272,53 @@ void wayland_surface_make_toplevel(struct wayland_surface *surface)
 err:
     wayland_surface_clear_role(surface);
     ERR("Failed to assign toplevel role to wayland surface\n");
+}
+
+/**********************************************************************
+ *          wayland_surface_make_subsurface
+ *
+ * Gives the subsurface role to a plain wayland surface.
+ */
+void wayland_surface_make_subsurface(struct wayland_surface *surface,
+                                     struct wayland_surface *parent)
+{
+    struct wl_region *empty_region;
+
+    TRACE("surface=%p parent=%p\n", surface, parent);
+
+    surface->wl_subsurface =
+        wl_subcompositor_get_subsurface(process_wayland.wl_subcompositor,
+                                        surface->wl_surface,
+                                        parent->wl_surface);
+    if (!surface->wl_subsurface)
+    {
+        ERR("Failed to create client wl_subsurface\n");
+        goto err;
+    }
+
+    surface->role = WAYLAND_SURFACE_ROLE_SUBSURFACE;
+    surface->parent_hwnd = parent->hwnd;
+
+    /* Let parent handle all pointer events. */
+    empty_region = wl_compositor_create_region(process_wayland.wl_compositor);
+    if (!empty_region)
+    {
+        ERR("Failed to create wl_region\n");
+        goto err;
+    }
+    wl_surface_set_input_region(surface->wl_surface, empty_region);
+    wl_region_destroy(empty_region);
+
+    /* Present contents independently of the parent surface. */
+    wl_subsurface_set_desync(surface->wl_subsurface);
+
+    wl_display_flush(process_wayland.wl_display);
+
+    return;
+
+err:
+    wayland_surface_clear_role(surface);
+    ERR("Failed to assign subsurface role to wayland surface\n");
 }
 
 /**********************************************************************
@@ -290,10 +344,17 @@ void wayland_surface_clear_role(struct wayland_surface *surface)
         surface->xdg_surface = NULL;
     }
 
+    if (surface->wl_subsurface)
+    {
+        wl_subsurface_destroy(surface->wl_subsurface);
+        surface->wl_subsurface = NULL;
+    }
+
     memset(&surface->pending, 0, sizeof(surface->pending));
     memset(&surface->requested, 0, sizeof(surface->requested));
     memset(&surface->processing, 0, sizeof(surface->processing));
     memset(&surface->current, 0, sizeof(surface->current));
+    surface->parent_hwnd = 0;
 
     /* Ensure no buffer is attached, otherwise future role assignments may fail. */
     wl_surface_attach(surface->wl_surface, NULL, 0, 0);

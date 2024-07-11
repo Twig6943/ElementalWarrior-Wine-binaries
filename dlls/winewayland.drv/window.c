@@ -134,19 +134,32 @@ static void wayland_win_data_destroy(struct wayland_win_data *data)
 }
 
 /***********************************************************************
+ *           wayland_win_data_get_nolock
+ *
+ * Return the data structure associated with a window. This function does
+ * not lock the win_data_mutex, so it must be externally synchronized.
+ */
+static struct wayland_win_data *wayland_win_data_get_nolock(HWND hwnd)
+{
+    struct rb_entry *rb_entry;
+
+    if ((rb_entry = rb_get(&win_data_rb, hwnd)))
+        return RB_ENTRY_VALUE(rb_entry, struct wayland_win_data, entry);
+
+    return NULL;
+}
+
+/***********************************************************************
  *           wayland_win_data_get
  *
  * Lock and return the data structure associated with a window.
  */
 struct wayland_win_data *wayland_win_data_get(HWND hwnd)
 {
-    struct rb_entry *rb_entry;
+    struct wayland_win_data *data;
 
     pthread_mutex_lock(&win_data_mutex);
-
-    if ((rb_entry = rb_get(&win_data_rb, hwnd)))
-        return RB_ENTRY_VALUE(rb_entry, struct wayland_win_data, entry);
-
+    if ((data = wayland_win_data_get_nolock(hwnd))) return data;
     pthread_mutex_unlock(&win_data_mutex);
 
     return NULL;
@@ -205,38 +218,42 @@ static void reapply_cursor_clipping(void)
 static void wayland_win_data_update_wayland_surface(struct wayland_win_data *data)
 {
     struct wayland_surface *surface = data->wayland_surface;
-    HWND parent = NtUserGetAncestor(data->hwnd, GA_PARENT);
-    BOOL visible, xdg_visible;
+    struct wayland_win_data *parent_data;
+    enum wayland_surface_role role;
     WCHAR text[1024];
 
     TRACE("hwnd=%p\n", data->hwnd);
 
-    /* We don't want wayland surfaces for child windows. */
-    if (parent != NtUserGetDesktopWindow() && parent != 0)
+    if (NtUserGetWindowLongW(data->hwnd, GWL_STYLE) & WS_VISIBLE)
     {
-        if (data->window_surface)
-            wayland_window_surface_update_wayland_surface(data->window_surface, NULL, NULL);
-        if (surface) wayland_surface_destroy(surface);
-        surface = NULL;
-        goto out;
+        parent_data = wayland_win_data_get_nolock(NtUserGetAncestor(data->hwnd, GA_PARENT));
+        if (parent_data && parent_data->wayland_surface)
+            role = WAYLAND_SURFACE_ROLE_SUBSURFACE;
+        else
+            role = WAYLAND_SURFACE_ROLE_TOPLEVEL;
     }
+    else
+        role = WAYLAND_SURFACE_ROLE_NONE;
 
-    /* Otherwise ensure that we have a wayland surface. */
-    if (!surface && !(surface = wayland_surface_create(data->hwnd))) return;
+    /* We can temporarily remove a role from a wayland surface and add it back,
+     * but we can't change a surface's role.
+     * TODO: Recreate the surface to allow role change. */
+    if (surface && role && surface->role && role != surface->role) goto out;
 
-    visible = (NtUserGetWindowLongW(data->hwnd, GWL_STYLE) & WS_VISIBLE) == WS_VISIBLE;
-    xdg_visible = surface->xdg_toplevel != NULL;
+    /* Ensure that we have a wayland surface. */
+    if (!surface && !(surface = wayland_surface_create(data->hwnd))) goto out;
 
     pthread_mutex_lock(&surface->mutex);
 
-    if (visible != xdg_visible)
+    if ((role == WAYLAND_SURFACE_ROLE_TOPLEVEL) != !!(surface->xdg_toplevel) ||
+        (role == WAYLAND_SURFACE_ROLE_SUBSURFACE) != !!(surface->wl_subsurface) ||
+        (role == WAYLAND_SURFACE_ROLE_SUBSURFACE && surface->parent_hwnd != parent_data->hwnd))
     {
         /* If we have a pre-existing surface ensure it has no role. */
         if (data->wayland_surface) wayland_surface_clear_role(surface);
-        /* If the window is a visible toplevel make it a wayland
-         * xdg_toplevel. Otherwise keep it role-less to avoid polluting the
-         * compositor with empty xdg_toplevels. */
-        if (visible)
+        /* If the window is visible give it a role, otherwise keep it role-less
+         * to avoid polluting the compositor with unused role objects. */
+        if (role == WAYLAND_SURFACE_ROLE_TOPLEVEL)
         {
             wayland_surface_make_toplevel(surface);
             if (surface->xdg_toplevel)
@@ -245,6 +262,12 @@ static void wayland_win_data_update_wayland_surface(struct wayland_win_data *dat
                     text[0] = 0;
                 wayland_surface_set_title(surface, text);
             }
+        }
+        else if (role == WAYLAND_SURFACE_ROLE_SUBSURFACE)
+        {
+            pthread_mutex_lock(&parent_data->wayland_surface->mutex);
+            wayland_surface_make_subsurface(surface, parent_data->wayland_surface);
+            pthread_mutex_unlock(&parent_data->wayland_surface->mutex);
         }
     }
 

@@ -294,6 +294,7 @@ struct wayland_win_data
     RECT window_rect;
     /* USER client rectangle relative to win32 parent window client area */
     RECT client_rect;
+    RECT visible_rect;
     BOOL managed;
 };
 

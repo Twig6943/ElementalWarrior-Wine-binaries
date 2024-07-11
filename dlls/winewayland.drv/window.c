@@ -78,7 +78,8 @@ static struct rb_tree win_data_rb = { wayland_win_data_cmp_rb };
  */
 static struct wayland_win_data *wayland_win_data_create(HWND hwnd,
                                                         const RECT *window_rect,
-                                                        const RECT *client_rect)
+                                                        const RECT *client_rect,
+                                                        const RECT *visible_rect)
 {
     struct wayland_win_data *data;
     struct rb_entry *rb_entry;
@@ -94,6 +95,7 @@ static struct wayland_win_data *wayland_win_data_create(HWND hwnd,
     data->hwnd = hwnd;
     data->window_rect = *window_rect;
     data->client_rect = *client_rect;
+    data->visible_rect = *visible_rect;
 
     pthread_mutex_lock(&win_data_mutex);
 
@@ -200,14 +202,14 @@ static void reapply_cursor_clipping(void)
     NtUserSetThreadDpiAwarenessContext(context);
 }
 
-static void wayland_win_data_update_wayland_surface(struct wayland_win_data *data, const RECT *visible_rect)
+static void wayland_win_data_update_wayland_surface(struct wayland_win_data *data)
 {
     struct wayland_surface *surface = data->wayland_surface;
     HWND parent = NtUserGetAncestor(data->hwnd, GA_PARENT);
     BOOL visible, xdg_visible;
     WCHAR text[1024];
 
-    TRACE("hwnd=%p, rect=%s\n", data->hwnd, wine_dbgstr_rect(visible_rect));
+    TRACE("hwnd=%p\n", data->hwnd);
 
     /* We don't want wayland surfaces for child windows. */
     if (parent != NtUserGetDesktopWindow() && parent != 0)
@@ -251,7 +253,8 @@ static void wayland_win_data_update_wayland_surface(struct wayland_win_data *dat
     pthread_mutex_unlock(&surface->mutex);
 
     if (data->window_surface)
-        wayland_window_surface_update_wayland_surface(data->window_surface, visible_rect, surface);
+        wayland_window_surface_update_wayland_surface(data->window_surface,
+                                                      &data->visible_rect, surface);
 
     /* Size/position changes affect the effective pointer constraint, so update
      * it as needed. */
@@ -438,7 +441,8 @@ BOOL WAYLAND_WindowPosChanging(HWND hwnd, UINT swp_flags, BOOL shaped, const REC
           hwnd, swp_flags, shaped, wine_dbgstr_rect(window_rect), wine_dbgstr_rect(client_rect),
           wine_dbgstr_rect(visible_rect));
 
-    if (!data && !(data = wayland_win_data_create(hwnd, window_rect, client_rect))) return FALSE; /* use default surface */
+    if (!data && !(data = wayland_win_data_create(hwnd, window_rect, client_rect, visible_rect)))
+        return FALSE; /* use default surface */
 
     parent = NtUserGetAncestor(hwnd, GA_PARENT);
     if ((parent && parent != NtUserGetDesktopWindow())) goto done; /* use default surface */
@@ -475,13 +479,14 @@ void WAYLAND_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
 
     data->window_rect = *window_rect;
     data->client_rect = *client_rect;
+    data->visible_rect = *visible_rect;
     data->managed = managed;
 
     if (surface) window_surface_add_ref(surface);
     if (data->window_surface) window_surface_release(data->window_surface);
     data->window_surface = surface;
 
-    wayland_win_data_update_wayland_surface(data, visible_rect);
+    wayland_win_data_update_wayland_surface(data);
     if (data->wayland_surface) wayland_win_data_update_wayland_state(data);
 
     wayland_win_data_release(data);

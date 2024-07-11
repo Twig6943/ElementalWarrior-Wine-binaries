@@ -295,7 +295,16 @@ static void wayland_win_data_update_wayland_state(struct wayland_win_data *data)
 
     pthread_mutex_lock(&surface->mutex);
 
-    if (!surface->xdg_toplevel) goto out;
+    if (surface->wl_subsurface)
+    {
+        TRACE("hwnd=%p subsurface parent=%p\n", surface->hwnd, surface->parent_hwnd);
+        /* Although subsurfaces don't have a dedicated surface config mechanism,
+         * we use the config fields to mark them as updated. */
+        surface->processing.serial = 1;
+        surface->processing.processed = TRUE;
+        goto out;
+    }
+    else if (!surface->xdg_toplevel) goto out;
 
     processing_config = surface->processing.serial &&
                         !surface->processing.processed;

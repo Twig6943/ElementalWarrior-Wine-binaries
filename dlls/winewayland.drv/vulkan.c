@@ -85,7 +85,7 @@ static VkResult wayland_vulkan_surface_create(HWND hwnd, VkInstance instance, Vk
 
     TRACE("%p %p %p %p\n", hwnd, instance, surface, private);
 
-    wayland_surface = wayland_surface_lock_hwnd(hwnd);
+    wayland_surface = wayland_surface_lock_accel_hwnd(hwnd);
     if (!wayland_surface)
     {
         ERR("Failed to find wayland surface for hwnd=%p\n", hwnd);

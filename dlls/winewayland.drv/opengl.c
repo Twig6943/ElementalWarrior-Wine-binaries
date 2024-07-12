@@ -165,7 +165,7 @@ static struct wayland_gl_drawable *wayland_gl_drawable_create(HWND hwnd, int for
     /* Get the client surface for the HWND. If don't have a wayland surface
      * (e.g., HWND_MESSAGE windows) just create a dummy surface to act as the
      * target render surface. */
-    if ((wayland_surface = wayland_surface_lock_hwnd(hwnd)))
+    if ((wayland_surface = wayland_surface_lock_accel_hwnd(hwnd)))
     {
         gl->client = wayland_surface_get_client(wayland_surface);
         client_width = wayland_surface->window.client_rect.right -

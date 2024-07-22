@@ -213,7 +213,9 @@ struct wayland_surface
     int buffer_width, buffer_height;
     HCURSOR hcursor;
     enum wayland_surface_role role;
-    HWND parent_hwnd;
+    LONG weak_ref;
+    BOOL destroyed;
+    struct wayland_surface *parent_weak_ref;
 };
 
 struct wayland_shm_buffer
@@ -247,6 +249,9 @@ void wayland_output_use_xdg_extension(struct wayland_output *output);
  */
 
 struct wayland_surface *wayland_surface_create(HWND hwnd);
+struct wayland_surface *wayland_surface_get_weak_ref(struct wayland_surface *surface);
+void wayland_surface_release_weak_ref(struct wayland_surface *surface);
+struct wayland_surface *wayland_surface_lock_weak_ref(struct wayland_surface *surface);
 void wayland_surface_destroy(struct wayland_surface *surface);
 void wayland_surface_make_toplevel(struct wayland_surface *surface);
 void wayland_surface_make_subsurface(struct wayland_surface *surface,

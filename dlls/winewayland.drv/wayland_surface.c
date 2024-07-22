@@ -168,11 +168,49 @@ struct wayland_surface *wayland_surface_create(HWND hwnd)
     }
 
     surface->window.scale = 1.0;
+    surface->weak_ref = 1;
 
     return surface;
 
 err:
     if (surface) wayland_surface_destroy(surface);
+    return NULL;
+}
+
+/**********************************************************************
+ *          wayland_surface_get_weak_ref
+ *
+ * Gets a weak reference to a wayland_surface.
+ */
+struct wayland_surface *wayland_surface_get_weak_ref(struct wayland_surface *surface)
+{
+    InterlockedIncrement(&surface->weak_ref);
+    return surface;
+}
+
+/**********************************************************************
+ *          wayland_surface_get_weak_ref
+ *
+ * Releases a weak reference to a wayland_surface.
+ */
+void wayland_surface_release_weak_ref(struct wayland_surface *surface)
+{
+    if (InterlockedDecrement(&surface->weak_ref) > 0) return;
+    pthread_mutex_destroy(&surface->mutex);
+    free(surface);
+}
+
+/**********************************************************************
+ *          wayland_surface_lock_weak_ref
+ *
+ * Returns a locked wayland_surface from a weak reference, or NULL if the
+ * surface has been destroyed.
+ */
+struct wayland_surface *wayland_surface_lock_weak_ref(struct wayland_surface *surface)
+{
+    pthread_mutex_lock(&surface->mutex);
+    if (!surface->destroyed) return surface;
+    pthread_mutex_unlock(&surface->mutex);
     return NULL;
 }
 
@@ -237,9 +275,7 @@ void wayland_surface_destroy(struct wayland_surface *surface)
 
     wl_display_flush(process_wayland.wl_display);
 
-    pthread_mutex_destroy(&surface->mutex);
-
-    free(surface);
+    wayland_surface_release_weak_ref(surface);
 }
 
 /**********************************************************************
@@ -297,7 +333,7 @@ void wayland_surface_make_subsurface(struct wayland_surface *surface,
     }
 
     surface->role = WAYLAND_SURFACE_ROLE_SUBSURFACE;
-    surface->parent_hwnd = parent->hwnd;
+    surface->parent_weak_ref = wayland_surface_get_weak_ref(parent);
 
     /* Let parent handle all pointer events. */
     empty_region = wl_compositor_create_region(process_wayland.wl_compositor);
@@ -350,11 +386,16 @@ void wayland_surface_clear_role(struct wayland_surface *surface)
         surface->wl_subsurface = NULL;
     }
 
+    if (surface->parent_weak_ref)
+    {
+        wayland_surface_release_weak_ref(surface->parent_weak_ref);
+        surface->parent_weak_ref = NULL;
+    }
+
     memset(&surface->pending, 0, sizeof(surface->pending));
     memset(&surface->requested, 0, sizeof(surface->requested));
     memset(&surface->processing, 0, sizeof(surface->processing));
     memset(&surface->current, 0, sizeof(surface->current));
-    surface->parent_hwnd = 0;
 
     /* Ensure no buffer is attached, otherwise future role assignments may fail. */
     wl_surface_attach(surface->wl_surface, NULL, 0, 0);
@@ -646,12 +687,9 @@ static void wayland_surface_reconfigure_subsurface(struct wayland_surface *surfa
     struct wayland_surface *parent;
     int local_x, local_y, x, y;
 
-    /* TODO: Locking the parent surface using the HWND may lead to a deadlock,
-     * since we will try to acquire the win_data_mutex while holding a surface
-     * mutex (from the argument of this function), whereas all other paths
-     * acquire the win_data_mutex before any surface mutex. */
     if (surface->processing.serial && surface->processing.processed &&
-        (parent = wayland_surface_lock_hwnd(surface->parent_hwnd)))
+        surface->parent_weak_ref &&
+        (parent = wayland_surface_lock_weak_ref(surface->parent_weak_ref)))
     {
         /* For now we use a subsurface only for child windows, whose window
          * coordinates are relative to the client area of their parent. */

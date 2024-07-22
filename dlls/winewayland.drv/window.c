@@ -247,7 +247,8 @@ static void wayland_win_data_update_wayland_surface(struct wayland_win_data *dat
 
     if ((role == WAYLAND_SURFACE_ROLE_TOPLEVEL) != !!(surface->xdg_toplevel) ||
         (role == WAYLAND_SURFACE_ROLE_SUBSURFACE) != !!(surface->wl_subsurface) ||
-        (role == WAYLAND_SURFACE_ROLE_SUBSURFACE && surface->parent_hwnd != parent_data->hwnd))
+        (role == WAYLAND_SURFACE_ROLE_SUBSURFACE &&
+         surface->parent_weak_ref && surface->parent_weak_ref->hwnd != parent_data->hwnd))
     {
         /* If we have a pre-existing surface ensure it has no role. */
         if (data->wayland_surface) wayland_surface_clear_role(surface);
@@ -297,7 +298,8 @@ static void wayland_win_data_update_wayland_state(struct wayland_win_data *data)
 
     if (surface->wl_subsurface)
     {
-        TRACE("hwnd=%p subsurface parent=%p\n", surface->hwnd, surface->parent_hwnd);
+        TRACE("hwnd=%p subsurface parent=%p\n", surface->hwnd,
+              surface->parent_weak_ref ? surface->parent_weak_ref->hwnd : 0);
         /* Although subsurfaces don't have a dedicated surface config mechanism,
          * we use the config fields to mark them as updated. */
         surface->processing.serial = 1;

@@ -155,8 +155,7 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue queue, const VkPresentInfoKHR 
             UINT width, height;
             RECT client_rect;
             HDC hdc_dst;
-
-            NtUserGetClientRect( surface->hwnd, &client_rect );
+            NtUserGetClientRect( surface->hwnd, &client_rect, get_dpi_for_window(surface->hwnd) );
             width = client_rect.right - client_rect.left;
             height = client_rect.bottom - client_rect.top;
 
@@ -456,6 +455,7 @@ void vulkan_set_region( HWND toplevel, HRGN region )
 {
     struct list surfaces = LIST_INIT(surfaces);
     struct surface *surface;
+    UINT_PTR dpi = (UINT_PTR)get_dpi_for_window(toplevel);
 
     enum_window_surfaces( toplevel, toplevel, &surfaces );
 
@@ -464,8 +464,8 @@ void vulkan_set_region( HWND toplevel, HRGN region )
         RECT client_rect;
         BOOL is_clipped;
 
-        NtUserGetClientRect( surface->hwnd, &client_rect );
-        NtUserMapWindowPoints( surface->hwnd, toplevel, (POINT *)&client_rect, 2 );
+        NtUserGetClientRect( surface->hwnd, &client_rect, dpi );
+        NtUserMapWindowPoints( surface->hwnd, toplevel, (POINT *)&client_rect, 2, dpi);
         is_clipped = NtGdiRectInRegion( region, &client_rect );
 
         if (is_clipped && !surface->offscreen_dc)
@@ -484,23 +484,6 @@ void vulkan_set_region( HWND toplevel, HRGN region )
     }
 
     append_window_surfaces( toplevel, &surfaces );
-}
-
-/***********************************************************************
- *      __wine_get_vulkan_driver  (win32u.so)
- */
-const struct vulkan_funcs *__wine_get_vulkan_driver( UINT version )
-{
-    static pthread_once_t init_once = PTHREAD_ONCE_INIT;
-
-    if (version != WINE_VULKAN_DRIVER_VERSION)
-    {
-        ERR( "version mismatch, vulkan wants %u but win32u has %u\n", version, WINE_VULKAN_DRIVER_VERSION );
-        return NULL;
-    }
-
-    pthread_once( &init_once, vulkan_init );
-    return vulkan_handle ? &vulkan_funcs : NULL;
 }
 
 #else /* SONAME_LIBVULKAN */

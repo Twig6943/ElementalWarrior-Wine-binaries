@@ -1485,7 +1485,7 @@ static void sync_client_position( struct x11drv_win_data *data,
         HWND toplevel = NtUserGetAncestor( data->hwnd, GA_ROOT );
         POINT pos = {data->client_rect.left, data->client_rect.top};
 
-        NtUserMapWindowPoints( toplevel, toplevel, &pos, 1 );
+        NtUserMapWindowPoints( toplevel, toplevel, &pos, 1, NtUserGetThreadInfo()->dpi_context );
         changes.x = pos.x;
         changes.y = pos.y;
     }
@@ -1674,7 +1674,7 @@ void attach_client_window( struct x11drv_win_data *data, Window client_window )
 
         pos.x = data->client_rect.left;
         pos.y = data->client_rect.top;
-        NtUserMapWindowPoints( toplevel, toplevel, &pos, 1 );
+        NtUserMapWindowPoints( toplevel, toplevel, &pos, 1, NtUserGetThreadInfo()->dpi_context );
     }
     if (!whole_window) whole_window = get_dummy_parent();
 

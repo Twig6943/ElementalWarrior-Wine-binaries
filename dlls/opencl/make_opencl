@@ -60,7 +60,6 @@ my %unsupported_extensions =
         # Needs wined3d integration.
         "cl_intel_d3d11_nv12_media_sharing" => 1,
         "cl_intel_dx9_media_sharing" => 1,
-        "cl_khr_d3d10_sharing" => 1,
         "cl_khr_d3d11_sharing" => 1,
         "cl_khr_dx9_media_sharing" => 1,
         "cl_nv_d3d9_sharing" => 1,
@@ -74,6 +73,11 @@ my %unsupported_extensions =
         # Needs callback conversion.
         "cl_apple_setmemobjectdestructor" => 1,
         "cl_arm_shared_virtual_memory" => 1,
+    );
+
+my %provided_extensions =
+    (
+        "cl_khr_d3d10_sharing" => 1,
     );
 
 sub generate_pe_thunk($$)
@@ -509,6 +513,8 @@ sub parse_file($)
         # support KHR_gl_sharing yet, but we need to export the functions anyway
         # (some applications expect them to be present).
         parse_feature($ext, 0) if lc($ext->{name}) eq "cl_khr_gl_sharing";
+        parse_feature($ext, 0) if lc($ext->{name}) eq "cl_khr_device_uuid";
+        parse_feature($ext, 0) if lc($ext->{name}) eq "cl_khr_d3d10_sharing";
     }
 }
 
@@ -532,7 +538,8 @@ print PE "/* Automatically generated from OpenCL registry files; DO NOT EDIT! */
 
 print PE "#include \"opencl_private.h\"\n";
 print PE "#include \"opencl_types.h\"\n";
-print PE "#include \"unixlib.h\"\n\n";
+print PE "#include \"unixlib.h\"\n";
+print PE "#include \"extensions.h\"\n\n";
 
 print PE "WINE_DEFAULT_DEBUG_CHANNEL(opencl);\n" if $gen_traces;
 
@@ -560,6 +567,12 @@ foreach (sort keys %unsupported_extensions)
 
 print PE <<EOF
     };
+
+    for (i = 0; i< ARRAY_SIZE(known_extensions); i++)
+    {
+        if (known_extensions[i].get_function && !strncasecmp( name, known_extensions[i].name, len ))
+            return TRUE;
+    }
 
     for (i = 0; i < ARRAY_SIZE(unsupported); ++i)
     {

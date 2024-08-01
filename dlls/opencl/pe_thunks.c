@@ -3,6 +3,7 @@
 #include "opencl_private.h"
 #include "opencl_types.h"
 #include "unixlib.h"
+#include "extensions.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(opencl);
 
@@ -666,6 +667,12 @@ BOOL extension_is_supported( const char *name, size_t len )
         "cl_nv_d3d9_sharing",
         "cl_qcom_ext_host_ptr",
     };
+
+    for (i = 0; i< ARRAY_SIZE(known_extensions); i++)
+    {
+        if (known_extensions[i].get_function && !strncasecmp( name, known_extensions[i].name, len ))
+            return TRUE;
+    }
 
     for (i = 0; i < ARRAY_SIZE(unsupported); ++i)
     {

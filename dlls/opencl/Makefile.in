@@ -6,4 +6,5 @@ SOURCES = \
 	pe_thunks.c \
 	pe_wrappers.c \
 	unix_thunks.c \
-	unix_wrappers.c
+	unix_wrappers.c \
+	cl_khr_d3d10_sharing.c

@@ -16,13 +16,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "dxcore.h"
-#include "wine/debug.h"
+#define DXCORE_INIT_GUID
+#include "dxcore_interface.h"
+
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxcore);
 
 HRESULT WINAPI DXCoreCreateAdapterFactory( REFIID riid, void **ppv )
 {
-    FIXME( "riid %s, ppv %p stub!\n", debugstr_guid(riid), ppv );
-    return E_NOINTERFACE;
+    TRACE( "riid %s, ppv %p\n", debugstr_guid(riid), ppv );
+    return dxcore_factory_create(riid, ppv);
 }

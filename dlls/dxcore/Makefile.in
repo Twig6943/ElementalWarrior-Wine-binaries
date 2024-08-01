@@ -1,4 +1,8 @@
 MODULE = dxcore.dll
+IMPORTLIB = dxcore
+IMPORTS = dxgi dxguid uuid wined3d user32 win32u
 
 SOURCES = \
-	main.c
+	main.c \
+	factory.c \
+	adapter.c

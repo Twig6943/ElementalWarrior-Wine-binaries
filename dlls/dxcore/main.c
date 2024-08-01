@@ -17,7 +17,7 @@
  */
 
 #define DXCORE_INIT_GUID
-#include "dxcore_interface.h"
+#include "private.h"
 
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxcore);

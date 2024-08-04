@@ -22,6 +22,7 @@
 #include "opencl_types.h"
 #include "unixlib.h"
 #include "wine/wgl.h"
+#include "extensions.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(opencl);
 
@@ -35,6 +36,13 @@ static cl_int filter_extensions( const char *unix_exts, SIZE_T size, char *win_e
 
     ext = unix_exts;
     win_size = 0;
+
+    for (int i=0; i<ARRAY_SIZE(known_extensions); i++) {
+        if (!strstr(ext, known_extensions[i].name)) {
+            win_size += strlen(known_extensions[i].name) + 1;
+        }
+    }
+
     while (*ext)
     {
         const char *end = strchr( ext, ' ' );
@@ -53,6 +61,17 @@ static cl_int filter_extensions( const char *unix_exts, SIZE_T size, char *win_e
     if (size < win_size) return CL_INVALID_VALUE;
 
     win_exts[0] = 0;
+
+    for (int i=0; i<ARRAY_SIZE(known_extensions); i++) {
+        size_t len;
+        if (!strstr(unix_exts, known_extensions[i].name)) {
+            len = strlen(known_extensions[i].name);
+            if (p != win_exts) *p++ = ' ';
+            memcpy(p, known_extensions[i].name, len);
+            p += len;
+        }
+    }
+
     ext = unix_exts;
     while (*ext)
     {
@@ -174,8 +193,17 @@ cl_int WINAPI clGetDeviceInfo( cl_device_id device, cl_device_info name,
 
 void * WINAPI clGetExtensionFunctionAddress( const char *func_name )
 {
+    int i;
     void * ret = 0;
     TRACE("(%s)\n",func_name);
+    for (i=0; i<ARRAY_SIZE(known_extensions); i++) {
+        if (known_extensions->get_function == NULL)
+            continue;
+        ret = known_extensions->get_function(func_name);
+        if (ret)
+            break;
+    }
+    return ret;
 #if 0
     ret = clGetExtensionFunctionAddress(func_name);
 #else
@@ -197,7 +225,7 @@ cl_int WINAPI clSetCommandQueueProperty( cl_command_queue command_queue, cl_comm
 void * WINAPI clGetExtensionFunctionAddressForPlatform( cl_platform_id platform, const char *func_name )
 {
     FIXME( "(%p, %s) stub!\n", platform, debugstr_a(func_name) );
-    return NULL;
+    return clGetExtensionFunctionAddress(func_name);
 }
 
 

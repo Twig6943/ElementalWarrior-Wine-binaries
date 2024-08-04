@@ -3,6 +3,7 @@
 #include "opencl_private.h"
 #include "opencl_types.h"
 #include "unixlib.h"
+#include "extensions.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(opencl);
 
@@ -581,9 +582,11 @@ cl_int WINAPI clRetainSampler( cl_sampler sampler )
 
 cl_int WINAPI clSetEventCallback( cl_event event, cl_int command_exec_callback_type, void (WINAPI* pfn_notify)(cl_event event, cl_int event_command_status, void *user_data), void* user_data )
 {
+    cl_int ret;
     struct clSetEventCallback_params params = { event, command_exec_callback_type, pfn_notify, user_data };
     TRACE( "(%p, %d, %p, %p)\n", event, command_exec_callback_type, pfn_notify, user_data );
-    return OPENCL_CALL( clSetEventCallback, &params );
+    ret = OPENCL_CALL( clSetEventCallback, &params );
+    return ret;
 }
 
 cl_int WINAPI clSetKernelArg( cl_kernel kernel, cl_uint arg_index, size_t arg_size, const void* arg_value )
@@ -666,6 +669,12 @@ BOOL extension_is_supported( const char *name, size_t len )
         "cl_nv_d3d9_sharing",
         "cl_qcom_ext_host_ptr",
     };
+
+    for (i = 0; i< ARRAY_SIZE(known_extensions); i++)
+    {
+        if (known_extensions[i].get_function && !strncasecmp( name, known_extensions[i].name, len ))
+            return TRUE;
+    }
 
     for (i = 0; i < ARRAY_SIZE(unsupported); ++i)
     {

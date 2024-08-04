@@ -586,6 +586,7 @@ cl_int WINAPI clSetEventCallback( cl_event event, cl_int command_exec_callback_t
     struct clSetEventCallback_params params = { event, command_exec_callback_type, pfn_notify, user_data };
     TRACE( "(%p, %d, %p, %p)\n", event, command_exec_callback_type, pfn_notify, user_data );
     ret = OPENCL_CALL( clSetEventCallback, &params );
+    params.pfn_notify(event, command_exec_callback_type, user_data);
     return ret;
 }
 

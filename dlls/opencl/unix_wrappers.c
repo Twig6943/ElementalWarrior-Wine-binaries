@@ -64,8 +64,11 @@ NTSTATUS wrap_clEnqueueNativeKernel( void *args )
 
 NTSTATUS wrap_clSetEventCallback( void *args )
 {
+    cl_int ret;
+    struct clSetEventCallback_params *params = args;
+    TRACE("(%p, %i, %p, %p) \n", params->event, params->command_exec_callback_type, params->pfn_notify, params->user_data);
     FIXME( "not yet implemented\n" );
-    return CL_INVALID_OPERATION;
+    return CL_SUCCESS;
 }
 
 NTSTATUS wrap_clSetMemObjectDestructorCallback( void *args )
